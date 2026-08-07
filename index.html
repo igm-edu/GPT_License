@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#17231c">
+  <title>GPT Business 운영대장</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#dashboard" aria-label="대시보드로 이동">
+        <span class="brand-mark">G</span>
+        <span><b>GPT Business</b><small>운영대장</small></span>
+      </a>
+      <nav class="nav" aria-label="주요 메뉴">
+        <button class="nav-item active" data-view="dashboard"><span>⌂</span> 대시보드</button>
+        <button class="nav-item" data-view="accounts"><span>▦</span> 워크스페이스</button>
+        <button class="nav-item" data-view="courses"><span>□</span> 강의 일정</button>
+        <button class="nav-item" data-view="guests"><span>♙</span> 기간제 멤버</button>
+        <button class="nav-item" data-view="settings"><span>⚙</span> 연결 설정</button>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="sync-dot" id="syncDot"></div>
+        <span id="syncLabel">로컬 데모 데이터</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="menu-button" id="menuButton" aria-label="메뉴 열기">☰</button>
+        <div>
+          <p class="eyebrow" id="todayLabel"></p>
+          <h1 id="pageTitle">운영 현황</h1>
+        </div>
+        <div class="top-actions">
+          <button class="button ghost" id="refreshButton">새로고침</button>
+          <button class="button primary" id="quickAddButton">+ 새 항목</button>
+        </div>
+      </header>
+
+      <section class="view active" id="dashboardView">
+        <div class="hero">
+          <div>
+            <span class="pill">TODAY'S OPERATIONS</span>
+            <h2>오늘 필요한 조치를<br>한눈에 확인하세요.</h2>
+            <p>워크스페이스 좌석, 강의 일정, 기간제 멤버 만료를 한곳에서 관리합니다.</p>
+          </div>
+          <div class="hero-stat">
+            <span>향후 30일 최대 부족</span>
+            <strong id="heroShortage">0</strong>
+            <small>seat shortage</small>
+          </div>
+        </div>
+
+        <div class="metrics" id="metrics"></div>
+
+        <div class="dashboard-grid">
+          <article class="card span-2">
+            <div class="card-head"><div><p class="eyebrow">CAPACITY</p><h3>워크스페이스 좌석 현황</h3></div><button class="text-button" data-go="accounts">전체 보기 →</button></div>
+            <div id="capacityList" class="capacity-list"></div>
+          </article>
+          <article class="card attention-card">
+            <div class="card-head"><div><p class="eyebrow">ACTION NEEDED</p><h3>처리할 일</h3></div><span class="count-badge" id="actionCount">0</span></div>
+            <div id="actionList" class="action-list"></div>
+          </article>
+          <article class="card span-3">
+            <div class="card-head"><div><p class="eyebrow">UPCOMING</p><h3>다가오는 강의</h3></div><button class="text-button" data-go="courses">캘린더 보기 →</button></div>
+            <div class="table-wrap"><table><thead><tr><th>일정</th><th>강의명</th><th>필요 좌석</th><th>배정</th><th>상태</th></tr></thead><tbody id="upcomingCourses"></tbody></table></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" id="accountsView">
+        <div class="section-tools">
+          <div class="search"><span>⌕</span><input id="accountSearch" placeholder="워크스페이스 또는 멤버 검색"></div>
+          <select id="accountFilter"><option value="all">전체 상태</option><option value="운영 중">운영 중</option><option value="종료 예정">종료 예정</option><option value="종료">종료</option></select>
+          <button class="button primary" data-add="root">+ 워크스페이스</button>
+        </div>
+        <div id="workspaceGrid" class="workspace-grid"></div>
+      </section>
+
+      <section class="view" id="coursesView">
+        <div class="section-tools calendar-tools">
+          <div class="month-switch"><button id="prevMonth" aria-label="이전 달">←</button><strong id="monthLabel"></strong><button id="nextMonth" aria-label="다음 달">→</button></div>
+          <div class="legend"><span><i class="ok"></i> 충족</span><span><i class="warn"></i> 일부 미배정</span><span><i class="danger"></i> 부족</span></div>
+          <button class="button primary" data-add="course">+ 강의 일정</button>
+        </div>
+        <article class="card calendar-card"><div class="calendar-week"><span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div><div class="calendar" id="calendar"></div></article>
+      </section>
+
+      <section class="view" id="guestsView">
+        <div class="section-tools">
+          <div class="search"><span>⌕</span><input id="guestSearch" placeholder="이름, 이메일, 소속 검색"></div>
+          <select id="guestFilter"><option value="all">전체 상태</option><option value="초대 예정">초대 예정</option><option value="이용 중">이용 중</option><option value="제거 필요">제거 필요</option><option value="제거 완료">제거 완료</option></select>
+          <button class="button primary" data-add="guest">+ 기간제 멤버</button>
+        </div>
+        <article class="card"><div class="table-wrap"><table><thead><tr><th>멤버</th><th>소속</th><th>워크스페이스</th><th>이용 기간</th><th>상태</th><th></th></tr></thead><tbody id="guestTable"></tbody></table></div></article>
+      </section>
+
+      <section class="view" id="settingsView">
+        <div class="settings-grid">
+          <article class="card settings-card"><p class="eyebrow">DATA SOURCE</p><h3>Google Sheets 연결</h3><p>배포한 Apps Script 웹 앱 URL을 입력하면 이 브라우저의 데이터 원본으로 사용합니다.</p><label>Apps Script URL<input id="apiUrlInput" type="url" placeholder="https://script.google.com/macros/s/.../exec"></label><div class="button-row"><button class="button primary" id="saveSettings">연결 저장</button><button class="button ghost danger-text" id="disconnectButton">연결 해제</button></div><p class="hint" id="connectionHint">현재 예시 데이터를 사용 중입니다.</p></article>
+          <article class="card settings-card"><p class="eyebrow">SEAT POLICY</p><h3>소유자 좌석 계산</h3><p>워크스페이스 소유자도 유료 좌석을 차지하는 경우 계산에 포함하세요.</p><label class="toggle-row"><span><b>Root 소유자 1석 포함</b><small>각 활성 워크스페이스마다 1석을 더 사용</small></span><input id="ownerSeatToggle" type="checkbox"><i></i></label></article>
+          <article class="card settings-card span-2"><p class="eyebrow">DEPLOYMENT</p><h3>GitHub Pages 배포 준비 완료</h3><p>이 프로젝트는 빌드 서버가 필요 없는 정적 HTML/CSS/JavaScript로 구성되어 있습니다. 저장소의 GitHub Pages를 “GitHub Actions” 소스로 선택하면 <code>main</code> 브랜치 변경 시 자동 배포됩니다.</p></article>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="editorDialog">
+    <form method="dialog" id="editorForm">
+      <div class="dialog-head"><div><p class="eyebrow" id="dialogEyebrow">NEW RECORD</p><h2 id="dialogTitle">새 항목</h2></div><button value="cancel" class="icon-button" aria-label="닫기">×</button></div>
+      <div id="formFields" class="form-grid"></div>
+      <div class="dialog-actions"><button value="cancel" class="button ghost">취소</button><button type="submit" value="default" class="button primary">저장</button></div>
+    </form>
+  </dialog>
+  <div class="toast" id="toast" role="status"></div>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
