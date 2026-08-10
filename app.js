@@ -56,6 +56,16 @@ const isActiveRoot = r => r.status==="운영 중" || r.status==="종료 예정";
 const isUsableChild = c => c.status!=="보관" && c.status!=="사용 중지";
 const isPlannedCourse = c => c.status!=="취소" && c.status!=="완료";
 
+// 워크스페이스 소유자도 실제로 쓸 수 있는 상시 계정이다. 다만 좌석을 차지하지 않는
+// 설정이면 그 워크스페이스에 자리가 없다는 뜻이므로 배정 대상에서 뺀다.
+function ownerAccount(root){return {id:`owner:${root.id}`,rootId:root.id,name:`${root.name} 소유자`,email:root.email,status:"소유자",owner:true}}
+function ownerIsMember(root){return !!state.settings.ownerUsesSeat && isActiveRoot(root)}
+// 전용 상시 계정을 먼저 쓰고 관리자 계정인 소유자는 마지막에 쓰도록 뒤에 붙인다.
+function permanentAccounts(root){
+  const list = state.children.filter(c=>c.rootId===root.id && isUsableChild(c));
+  return ownerIsMember(root) ? [...list, ownerAccount(root)] : list;
+}
+
 function activeGuests(rootId, date=isoDate(today)){return state.guests.filter(g=>g.rootId===rootId&&!g.removedAt&&g.start<=date&&g.end>=date).length}
 function seatsUsedOn(root, date=isoDate(today)){
   return state.children.filter(c=>c.rootId===root.id&&isUsableChild(c)).length
@@ -93,14 +103,14 @@ function pickOrder(pools, need, sizeOf, preferredId){
 function planPermanent(course, roots, need, takenAccounts){
   const blocked = new Set(takenAccounts.filter(t=>coursesOverlap(t.course, course)).map(t=>t.childId));
   const pools = roots
-    .map(root=>({root, accounts: state.children.filter(c=>c.rootId===root.id && isUsableChild(c) && !blocked.has(c.id))}))
+    .map(root=>({root, accounts: permanentAccounts(root).filter(c=>!blocked.has(c.id))}))
     .filter(p=>p.accounts.length);
   const groups=[]; let left=need;
   pickOrder(pools, need, p=>p.accounts.length, course.rootId).forEach(p=>{
     if(left<=0) return;
     const take = p.accounts.slice(0, Math.min(left, p.accounts.length));
     take.forEach(c=>takenAccounts.push({childId:c.id, course}));
-    groups.push({rootId:p.root.id, seats:take.length, accounts:take.map(c=>({id:c.id,name:c.name,email:c.email}))});
+    groups.push({rootId:p.root.id, seats:take.length, accounts:take.map(c=>({id:c.id,name:c.name,email:c.email,owner:!!c.owner}))});
     left -= take.length;
   });
   return {mode:"상시", need, filled:need-left, shortage:left, groups};
@@ -198,7 +208,7 @@ function renderAllocations(){
     const registered=state.guests.filter(g=>g.courseId===c.id&&!g.removedAt).length;
     const targets=p.groups.length?p.groups.map(g=>{
       const accounts=g.accounts?.length
-        ? `<div class="account-chips">${g.accounts.slice(0,5).map(a=>`<code title="${escapeHtml(a.name)}">${escapeHtml(a.email)}</code>`).join("")}${g.accounts.length>5?`<span class="more">외 ${g.accounts.length-5}개</span>`:""}</div>`
+        ? `<div class="account-chips">${g.accounts.slice(0,5).map(a=>`<code class="${a.owner?"owner":""}" title="${escapeHtml(a.name)}">${escapeHtml(a.email)}${a.owner?" · 소유자":""}</code>`).join("")}${g.accounts.length>5?`<span class="more">외 ${g.accounts.length-5}개</span>`:""}</div>`
         : `<div class="alloc-hint">이 워크스페이스에 ${g.seats}명을 초대하세요.</div>`;
       return `<div class="alloc-target"><div class="alloc-target-head"><b>${escapeHtml(rootName(g.rootId))}</b><span class="seat-count">${g.seats}${unit}</span></div>${accounts}</div>`;
     }).join(""):`<div class="alloc-target empty-target">배정 가능한 ${permanent?"상시 계정":"좌석"}이 없습니다.</div>`;
@@ -224,7 +234,10 @@ function renderAccounts(){
   const rows=state.roots.filter(r=>(f==="all"||r.status===f)&&[r.name,r.email,...state.children.filter(c=>c.rootId===r.id).flatMap(c=>[c.name,c.email])].join(' ').toLowerCase().includes(q));
   document.querySelector("#workspaceGrid").innerHTML=rows.map(r=>{
     const children=state.children.filter(c=>c.rootId===r.id&&c.status!=="보관");
-    return `<article class="workspace-card ${r.status==='종료'?'archived':''}"><div class="workspace-head"><div class="workspace-symbol">${escapeHtml(r.name.slice(0,1))}</div><div><h3>${escapeHtml(r.name)}</h3><p>${escapeHtml(r.email)}</p></div><span class="status ${statusClass(r.status)}">${r.status}</span></div><div class="workspace-stats"><div><small>총 좌석</small><b>${r.capacity}</b></div><div><small>사용</small><b>${usedSeats(r)}</b></div><div><small>여유</small><b>${freeSeats(r)}</b></div></div><div class="member-list">${children.map(c=>`<div class="member"><span class="avatar">${escapeHtml(c.name.slice(-2))}</span><div><b>${escapeHtml(c.name)}</b><small>${escapeHtml(c.email)}</small></div><span class="status ${statusClass(c.status)}">${c.status}</span><button class="mini-button" data-edit-child="${c.id}">수정</button></div>`).join('')||'<div class="empty">상시 멤버가 없습니다.</div>'}</div><div class="workspace-actions"><button class="mini-button" data-add-child="${r.id}">+ 상시 멤버</button><button class="mini-button" data-edit-root="${r.id}">워크스페이스 수정</button></div></article>`;
+    // 소유자 계정은 워크스페이스 수정 화면에서 다루므로 목록에서는 읽기 전용으로 보여준다.
+    const ownerRow=ownerIsMember(r)?`<div class="member"><span class="avatar">◆</span><div><b>${escapeHtml(r.name)} 소유자</b><small>${escapeHtml(r.email)}</small></div><span class="status neutral">소유자</span></div>`:'';
+    const memberRows=ownerRow+children.map(c=>`<div class="member"><span class="avatar">${escapeHtml(c.name.slice(-2))}</span><div><b>${escapeHtml(c.name)}</b><small>${escapeHtml(c.email)}</small></div><span class="status ${statusClass(c.status)}">${c.status}</span><button class="mini-button" data-edit-child="${c.id}">수정</button></div>`).join('');
+    return `<article class="workspace-card ${r.status==='종료'?'archived':''}"><div class="workspace-head"><div class="workspace-symbol">${escapeHtml(r.name.slice(0,1))}</div><div><h3>${escapeHtml(r.name)}</h3><p>${escapeHtml(r.email)}</p></div><span class="status ${statusClass(r.status)}">${r.status}</span></div><div class="workspace-stats"><div><small>총 좌석</small><b>${r.capacity}</b></div><div><small>사용</small><b>${usedSeats(r)}</b></div><div><small>여유</small><b>${freeSeats(r)}</b></div></div><div class="member-list">${memberRows||'<div class="empty">상시 멤버가 없습니다.</div>'}</div><div class="workspace-actions"><button class="mini-button" data-add-child="${r.id}">+ 상시 멤버</button><button class="mini-button" data-edit-root="${r.id}">워크스페이스 수정</button></div></article>`;
   }).join('')||'<div class="empty">검색 결과가 없습니다.</div>';
 }
 
