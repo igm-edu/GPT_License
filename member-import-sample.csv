@@ -1,0 +1,3 @@
+member_type,name,email,workspace_email,organization,start,end,status,memo
+상시,교육 운영 04,member04@example.com,owner-a@example.com,,,,사용 가능,상시 운영 계정
+기간제,홍길동,hong@example.com,owner-b@example.com,ABC 교육원,2026-08-10,2026-08-12,,워크숍 참여
