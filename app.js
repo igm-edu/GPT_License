@@ -249,6 +249,15 @@ function renderCalendar(){
 function renderSettings(){document.querySelector("#apiUrlInput").value=apiUrl();document.querySelector("#ownerSeatToggle").checked=!!state.settings.ownerUsesSeat;document.querySelector("#connectionHint").textContent=apiUrl()?"URL이 저장되어 있습니다. 새로고침 시 Sheets 데이터를 불러옵니다.":"현재 예시 또는 브라우저 저장 데이터를 사용 중입니다."}
 
 // ---- CSV 일괄 등록 ----------------------------------------------------------
+// 한국어 Windows의 Excel은 "CSV UTF-8"이 아닌 그냥 "CSV"로 저장하면 CP949로 기록한다.
+// UTF-8로 먼저 엄격하게 해석하고, 실패하면 CP949로 다시 읽는다. 조용히 깨진 글자가
+// 등록되는 것을 막기 위해 fatal 옵션이 반드시 필요하다.
+async function readCsvText(file){
+  const buffer = await file.arrayBuffer();
+  try{ return new TextDecoder("utf-8",{fatal:true}).decode(buffer) }
+  catch{ return new TextDecoder("euc-kr").decode(buffer) }
+}
+
 function parseCsv(text){
   const rows=[];let row=[],cell='',quoted=false;
   text=String(text).replace(/^﻿/,'');
@@ -414,7 +423,7 @@ document.addEventListener('click',e=>{
 });
 
 document.querySelector('#editorForm').addEventListener('submit',e=>{e.preventDefault();if(saveEditor(e.currentTarget))document.querySelector('#editorDialog').close()});
-document.querySelector('#importForm').addEventListener('submit',async e=>{e.preventDefault();const result=document.querySelector('#importResult'),file=document.querySelector('#csvFile').files[0];if(!file)return;try{const rows=parseCsv(await file.text());if(!rows.length)throw new Error('등록할 데이터가 없습니다.');const imported=importMembers(rows);if(imported.errors.length){result.className='import-result show';result.textContent=`등록 전 확인이 필요한 항목이 있습니다.\n${imported.errors.slice(0,8).join('\n')}${imported.errors.length>8?`\n외 ${imported.errors.length-8}건`:''}`;return}state.children.push(...imported.children);state.guests.push(...imported.guests);await persist();result.className='import-result show success';result.textContent=`상시 멤버 ${imported.children.length}명, 기간제 멤버 ${imported.guests.length}명을 등록했습니다.`;document.querySelector('#csvFile').value='';showToast('CSV 일괄 등록을 완료했습니다.')}catch(error){result.className='import-result show';result.textContent=error.message||'CSV 파일을 읽지 못했습니다.'}});
+document.querySelector('#importForm').addEventListener('submit',async e=>{e.preventDefault();const result=document.querySelector('#importResult'),file=document.querySelector('#csvFile').files[0];if(!file)return;try{const rows=parseCsv(await readCsvText(file));if(!rows.length)throw new Error('등록할 데이터가 없습니다.');const imported=importMembers(rows);if(imported.errors.length){result.className='import-result show';result.textContent=`등록 전 확인이 필요한 항목이 있습니다.\n${imported.errors.slice(0,8).join('\n')}${imported.errors.length>8?`\n외 ${imported.errors.length-8}건`:''}`;return}state.children.push(...imported.children);state.guests.push(...imported.guests);await persist();result.className='import-result show success';result.textContent=`상시 멤버 ${imported.children.length}명, 기간제 멤버 ${imported.guests.length}명을 등록했습니다.`;document.querySelector('#csvFile').value='';showToast('CSV 일괄 등록을 완료했습니다.')}catch(error){result.className='import-result show';result.textContent=error.message||'CSV 파일을 읽지 못했습니다.'}});
 ['accountSearch','accountFilter'].forEach(id=>document.querySelector(`#${id}`).addEventListener('input',renderAccounts));
 ['guestSearch','guestFilter'].forEach(id=>document.querySelector(`#${id}`).addEventListener('input',renderGuests));
 document.querySelector('#ownerSeatToggle').addEventListener('change',e=>{state.settings.ownerUsesSeat=e.target.checked;persist()});
