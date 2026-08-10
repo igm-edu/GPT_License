@@ -40,7 +40,12 @@ let editing = null;
 let plans = new Map();
 
 function loadLocal(){try{return JSON.parse(localStorage.getItem("gpt-account-manager-data")) || structuredClone(demoData)}catch{return structuredClone(demoData)}}
-function apiUrl(){return localStorage.getItem("gpt-account-manager-api") || window.APP_CONFIG?.appsScriptUrl || ""}
+// localStorage에 키가 있으면 빈 문자열이라도 그 값을 쓴다. 빈 문자열은 "이 브라우저에서는
+// 연결하지 않겠다"는 명시적 표시라서, config.js 기본값으로 되돌아가면 안 된다.
+const API_KEY = "gpt-account-manager-api";
+function defaultApiUrl(){return window.APP_CONFIG?.appsScriptUrl || ""}
+function apiUrl(){const saved=localStorage.getItem(API_KEY);return saved!==null?saved:defaultApiUrl()}
+function apiSource(){const saved=localStorage.getItem(API_KEY);return saved===null?(defaultApiUrl()?"default":"none"):(saved?"custom":"off")}
 function rootName(id){return state.roots.find(r=>r.id===id)?.name || "미지정"}
 function courseTitle(id){return state.courses.find(c=>c.id===id)?.title || ""}
 function guestStatus(g){if(g.removedAt)return "제거 완료";const d=isoDate(today);if(g.end<d)return "제거 필요";if(g.start>d)return "초대 예정";return "이용 중"}
@@ -277,7 +282,17 @@ function renderCalendar(){
   document.querySelector("#calendar").innerHTML=html;
 }
 
-function renderSettings(){document.querySelector("#apiUrlInput").value=apiUrl();document.querySelector("#ownerSeatToggle").checked=!!state.settings.ownerUsesSeat;document.querySelector("#connectionHint").textContent=apiUrl()?"URL이 저장되어 있습니다. 새로고침 시 Sheets 데이터를 불러옵니다.":"현재 예시 또는 브라우저 저장 데이터를 사용 중입니다."}
+function renderSettings(){
+  document.querySelector("#apiUrlInput").value=apiUrl();
+  document.querySelector("#ownerSeatToggle").checked=!!state.settings.ownerUsesSeat;
+  const hints={
+    default:"config.js에 설정된 기본 주소로 연결합니다. 다른 주소를 쓰려면 위 칸에 입력하고 저장하세요.",
+    custom:"이 브라우저에 저장된 주소를 사용합니다. 칸을 비우고 저장하면 기본 주소로 돌아갑니다.",
+    off:"이 브라우저에서는 연결하지 않습니다. 칸을 비운 채 '연결 저장'을 누르면 기본 주소로 돌아갑니다.",
+    none:"연결된 주소가 없어 예시 또는 브라우저 저장 데이터를 사용 중입니다."
+  };
+  document.querySelector("#connectionHint").textContent=hints[apiSource()];
+}
 
 // ---- CSV 일괄 등록 ----------------------------------------------------------
 // 한국어 Windows의 Excel은 "CSV UTF-8"이 아닌 그냥 "CSV"로 저장하면 CP949로 기록한다.
@@ -449,8 +464,11 @@ document.addEventListener('click',e=>{
   if(t.id==='prevMonth'){calendarDate=new Date(calendarDate.getFullYear(),calendarDate.getMonth()-1,1);renderCalendar()}
   if(t.id==='nextMonth'){calendarDate=new Date(calendarDate.getFullYear(),calendarDate.getMonth()+1,1);renderCalendar()}
   if(t.id==='refreshButton')loadRemote();
-  if(t.id==='saveSettings'){const url=document.querySelector('#apiUrlInput').value.trim();if(url&&!/^https:\/\/script\.google\.com\//.test(url)){showToast('Apps Script 웹 앱 URL을 확인해 주세요.');return}url?localStorage.setItem('gpt-account-manager-api',url):localStorage.removeItem('gpt-account-manager-api');showToast('연결 설정을 저장했습니다.');loadRemote()}
-  if(t.id==='disconnectButton'){localStorage.removeItem('gpt-account-manager-api');document.querySelector('#apiUrlInput').value='';setSync('','로컬 데이터');renderSettings();showToast('Sheets 연결을 해제했습니다.')}
+  if(t.id==='saveSettings'){const url=document.querySelector('#apiUrlInput').value.trim();if(url&&!/^https:\/\/script\.google\.com\//.test(url)){showToast('Apps Script 웹 앱 URL을 확인해 주세요.');return}
+    // 칸을 비우고 저장하면 재정의를 지워 config.js 기본값으로 되돌린다.
+    url?localStorage.setItem(API_KEY,url):localStorage.removeItem(API_KEY);
+    showToast(url?'연결 설정을 저장했습니다.':'기본 주소로 되돌렸습니다.');renderSettings();loadRemote()}
+  if(t.id==='disconnectButton'){localStorage.setItem(API_KEY,'');document.querySelector('#apiUrlInput').value='';setSync('','로컬 데이터');renderSettings();showToast('이 브라우저에서 Sheets 연결을 해제했습니다.')}
 });
 
 document.querySelector('#editorForm').addEventListener('submit',e=>{e.preventDefault();if(saveEditor(e.currentTarget))document.querySelector('#editorDialog').close()});
