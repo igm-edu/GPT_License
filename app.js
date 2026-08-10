@@ -123,20 +123,36 @@ function planPermanent(course, roots, need, takenAccounts){
 
 function planGuest(course, roots, need, takenSeats){
   const from = dateOnly(course.start), to = dateOnly(course.end) || from;
+  // 이 강의로 이미 초대된 기간제 멤버는 좌석을 쓰는 동시에 이 강의의 배정분이다.
+  // 남은 인원에서 빼지 않으면 같은 사람을 두 번 세어 좌석이 부족한 것처럼 보인다.
+  const placed = new Map();
+  state.guests.filter(g=>g.courseId===course.id && !g.removedAt)
+    .forEach(g=>placed.set(g.rootId, (placed.get(g.rootId)||0)+1));
+  const placedTotal = [...placed.values()].reduce((a,b)=>a+b, 0);
+
+  const groups = [];
+  const groupFor = rootId => {
+    let g = groups.find(x=>x.rootId===rootId);
+    if(!g){ g = {rootId, seats:0, invited:0}; groups.push(g) }
+    return g;
+  };
+  placed.forEach((count,rootId)=>{const g=groupFor(rootId);g.seats+=count;g.invited+=count});
+
   const pools = roots.map(root=>{
     const reserved = takenSeats.filter(t=>t.rootId===root.id && courseDaysOverlap(t.course, course)).reduce((a,t)=>a+t.seats, 0);
     const free = Math.min(freeSeatsOn(root, from), freeSeatsOn(root, to)) - reserved;
     return {root, free: Math.max(0, free)};
   }).filter(p=>p.free>0);
-  const groups=[]; let left=need;
-  pickOrder(pools, need, p=>p.free, course.rootId).forEach(p=>{
+
+  let left = Math.max(0, need - placedTotal);
+  pickOrder(pools, left, p=>p.free, course.rootId).forEach(p=>{
     if(left<=0) return;
     const seats = Math.min(left, p.free);
     takenSeats.push({rootId:p.root.id, course, seats});
-    groups.push({rootId:p.root.id, seats});
+    groupFor(p.root.id).seats += seats;
     left -= seats;
   });
-  return {mode:"기간제", need, filled:need-left, shortage:left, groups};
+  return {mode:"기간제", need, filled:need-left, shortage:left, groups, invited:placedTotal};
 }
 
 // 강의를 시작 순서대로 처리하며 좌석과 계정을 소진시킨다. 먼저 잡힌 강의가 우선권을 갖는다.
@@ -230,9 +246,12 @@ function renderAllocations(){
     const p=planOf(c), permanent=p.mode==="상시", unit=permanent?"개":"석";
     const registered=state.guests.filter(g=>g.courseId===c.id&&!g.removedAt).length;
     const targets=p.groups.length?p.groups.map(g=>{
+      const toInvite=g.seats-(g.invited||0), notes=[];
+      if(g.invited)notes.push(`이미 ${g.invited}명 초대됨`);
+      if(toInvite>0)notes.push(`${toInvite}명 더 초대하세요`);
       const accounts=g.accounts?.length
         ? `<div class="account-chips">${g.accounts.slice(0,5).map(a=>`<code class="${a.owner?"owner":""}" title="${escapeHtml(a.name)}">${escapeHtml(a.email)}${a.owner?" · 소유자":""}</code>`).join("")}${g.accounts.length>5?`<span class="more">외 ${g.accounts.length-5}개</span>`:""}</div>`
-        : `<div class="alloc-hint">이 워크스페이스에 ${g.seats}명을 초대하세요.</div>`;
+        : `<div class="alloc-hint ${toInvite>0?"":"done"}">${escapeHtml(notes.join(" · ")||"초대 인원이 없습니다.")}</div>`;
       return `<div class="alloc-target"><div class="alloc-target-head"><b>${escapeHtml(rootName(g.rootId))}</b><span class="seat-count">${g.seats}${unit}</span></div>${accounts}</div>`;
     }).join(""):`<div class="alloc-target empty-target">배정 가능한 ${permanent?"상시 계정":"좌석"}이 없습니다.</div>`;
     const badge=p.shortage>0
@@ -323,6 +342,18 @@ function parseCsv(text){
 
 function normalizeMemberType(value){const v=String(value).trim().toLowerCase();if(['상시','상시 멤버','child','permanent'].includes(v))return 'child';if(['기간제','기간제 멤버','guest','temporary'].includes(v))return 'guest';return ''}
 function validEmail(value){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)}
+// CSV의 course 열은 강의명으로도, 강의 id로도 지정할 수 있다.
+function findCourseRef(value){
+  const v = String(value ?? "").trim();
+  if(!v) return {id:""};
+  const pool = state.courses.filter(c=>c.status!=="취소");
+  const byId = pool.find(c=>c.id===v);
+  if(byId) return {id:byId.id};
+  const byTitle = pool.filter(c=>String(c.title).trim().toLowerCase()===v.toLowerCase());
+  if(byTitle.length===1) return {id:byTitle[0].id};
+  if(byTitle.length>1) return {error:"같은 이름의 강의가 여러 개입니다. course 열에 강의 id를 넣어 주세요."};
+  return {error:"course 열의 강의를 찾을 수 없습니다."};
+}
 function validDate(value){return /^\d{4}-\d{2}-\d{2}$/.test(value)&&!Number.isNaN(new Date(`${value}T00:00:00`).getTime())}
 function importMembers(rows){
   const errors=[],children=[],guests=[];
@@ -344,12 +375,17 @@ function importMembers(rows){
       seenChildren.add(key);children.push({id:uid('c'),rootId:root.id,name,email,status,memo:String(row.memo||'').trim()});
       return;
     }
-    const start=String(row.start||'').trim(),end=String(row.end||'').trim();
-    if(!validDate(start)||!validDate(end))return errors.push(`${row.line}행: 기간제 멤버의 start와 end를 YYYY-MM-DD로 입력해 주세요.`);
+    const courseRef=findCourseRef(row.course);
+    if(courseRef.error)return errors.push(`${row.line}행: ${courseRef.error}`);
+    const linked=courseRef.id?state.courses.find(c=>c.id===courseRef.id):null;
+    // 강의를 지정하고 기간을 비워 두면 그 강의 일정을 초대 기간으로 쓴다.
+    let start=String(row.start||'').trim(),end=String(row.end||'').trim();
+    if(linked&&!start&&!end){start=dateOnly(linked.start);end=dateOnly(linked.end)||start}
+    if(!validDate(start)||!validDate(end))return errors.push(`${row.line}행: 기간제 멤버의 start와 end를 YYYY-MM-DD로 입력하거나, course 열로 강의를 지정해 주세요.`);
     if(end<start)return errors.push(`${row.line}행: 종료일은 시작일보다 빠를 수 없습니다.`);
     const guestKey=`${email}|${root.id}|${start}|${end}`;
     if(seenGuests.has(guestKey))return errors.push(`${row.line}행: 같은 기간에 등록된 기간제 멤버입니다.`);
-    seenGuests.add(guestKey);guests.push({id:uid('g'),name,email,organization:String(row.organization||'').trim(),rootId:root.id,courseId:'',start,end,removedAt:'',memo:String(row.memo||'').trim()});
+    seenGuests.add(guestKey);guests.push({id:uid('g'),name,email,organization:String(row.organization||'').trim(),rootId:root.id,courseId:courseRef.id,start,end,removedAt:'',memo:String(row.memo||'').trim()});
   });
   return {errors,children,guests};
 }

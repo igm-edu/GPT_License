@@ -139,7 +139,7 @@
         <small>UTF-8 · CP949 자동 인식 · 첫 행은 열 이름</small>
         <input id="csvFile" name="csvFile" type="file" accept=".csv,text/csv" required>
       </label>
-      <div class="import-columns"><b>필수 열</b><code>member_type, email, workspace_email</code><small>기간제 멤버는 <code>start</code>, <code>end</code>도 필요합니다. 이름이 비어 있으면 이메일 앞부분을 사용합니다.</small></div>
+      <div class="import-columns"><b>필수 열</b><code>member_type, email, workspace_email</code><small>기간제 멤버는 <code>course</code>에 강의명(또는 강의 id)을 넣으면 그 강의로 연결되고 초대 기간도 강의 일정으로 채워집니다. 강의를 지정하지 않을 때만 <code>start</code>, <code>end</code>가 필요합니다. 이름이 비어 있으면 이메일 앞부분을 사용합니다.</small></div>
       <div id="importResult" class="import-result" aria-live="polite"></div>
       <div class="dialog-actions"><button type="button" class="button ghost" data-close-import>취소</button><button type="submit" class="button primary">등록하기</button></div>
     </form>
