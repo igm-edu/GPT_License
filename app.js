@@ -167,9 +167,27 @@ function upcomingCourses(days){
 // ---- 저장 ------------------------------------------------------------------
 async function loadRemote(){if(!apiUrl())return renderAll();setSync("loading","데이터 불러오는 중");try{const res=await fetch(`${apiUrl()}?action=all&t=${Date.now()}`);if(!res.ok)throw new Error();const json=await res.json();if(json.ok===false)throw new Error(json.error);state=json.data;normalize();localStorage.setItem("gpt-account-manager-data",JSON.stringify(state));setSync("connected","Google Sheets 연결됨");renderAll()}catch(e){setSync("error","연결 오류 · 로컬 데이터");showToast("Sheets 연결에 실패해 로컬 데이터를 표시합니다.");renderAll()}}
 async function persist(){normalize();renderAll();localStorage.setItem("gpt-account-manager-data",JSON.stringify(state));if(!apiUrl())return;setSync("loading","저장 중");try{const res=await fetch(apiUrl(),{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"saveAll",data:state})});const json=await res.json();if(json.ok===false)throw new Error(json.error);setSync("connected","Google Sheets 연결됨");showToast("Google Sheets에 저장했습니다.")}catch(e){setSync("error","동기화 실패 · 로컬 저장됨");showToast("로컬에는 저장했지만 Sheets 동기화에 실패했습니다.")}}
+// Sheets가 값을 날짜 셀로 바꾸면 "2026-08-11 9:00"이나 "2026-08-11T00:00" 형태로 돌아온다.
+// 이러면 date/datetime-local 입력이 값을 못 읽어 비어 보이고(저장 시 시간 유실),
+// 날짜를 문자열로 비교하는 좌석 계산도 어긋난다. 읽는 즉시 형태를 고정한다.
+const padPart = v => String(v).padStart(2,"0");
+function toDateText(value){
+  const m = String(value ?? "").trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  return m ? `${m[1]}-${padPart(m[2])}-${padPart(m[3])}` : "";
+}
+function toDateTimeText(value){
+  const m = String(value ?? "").trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{1,2}))?/);
+  return m ? `${m[1]}-${padPart(m[2])}-${padPart(m[3])}T${padPart(m[4] ?? 0)}:${padPart(m[5] ?? 0)}` : "";
+}
+
 function normalize(){
   state.roots ||= [];state.children ||= [];state.guests ||= [];state.courses ||= [];state.settings ||= {ownerUsesSeat:true};
-  state.courses.forEach(c=>{if(!MEMBER_MODES.includes(c.memberMode))c.memberMode="기간제"});
+  state.roots.forEach(r=>{r.expiry=toDateText(r.expiry)});
+  state.guests.forEach(g=>{g.start=toDateText(g.start);g.end=toDateText(g.end);g.removedAt=toDateText(g.removedAt)});
+  state.courses.forEach(c=>{
+    if(!MEMBER_MODES.includes(c.memberMode))c.memberMode="기간제";
+    c.start=toDateTimeText(c.start);c.end=toDateTimeText(c.end);
+  });
 }
 function setSync(type,label){document.querySelector("#syncLabel").textContent=label;document.querySelector("#syncDot").className=`sync-dot ${type==="connected"?"connected":""}`}
 
