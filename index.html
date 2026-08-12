@@ -104,10 +104,11 @@
         <div class="section-tools">
           <div class="search"><span>⌕</span><input id="guestSearch" placeholder="이름, 이메일, 소속 검색"></div>
           <select id="guestFilter"><option value="all">전체 상태</option><option value="초대 예정">초대 예정</option><option value="이용 중">이용 중</option><option value="제거 필요">제거 필요</option><option value="제거 완료">제거 완료</option></select>
+          <button class="button ghost danger-text" id="deleteSelectedGuests" hidden>선택 삭제</button>
           <button class="button ghost" data-open-import>CSV 일괄 등록</button>
           <button class="button primary" data-add="guest">+ 기간제 멤버</button>
         </div>
-        <article class="card"><div class="table-wrap"><table><thead><tr><th>멤버</th><th>소속</th><th>워크스페이스</th><th>이용 기간</th><th>상태</th><th></th></tr></thead><tbody id="guestTable"></tbody></table></div></article>
+        <article class="card"><div class="table-wrap"><table><thead><tr><th class="check-col"><input type="checkbox" id="guestSelectAll" aria-label="화면에 보이는 기간제 멤버 전체 선택"></th><th>멤버</th><th>소속</th><th>워크스페이스</th><th>이용 기간</th><th>상태</th><th></th></tr></thead><tbody id="guestTable"></tbody></table></div></article>
       </section>
 
       <section class="view" id="settingsView">

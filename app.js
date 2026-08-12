@@ -250,7 +250,7 @@ function renderAllocations(){
       if(g.invited)notes.push(`이미 ${g.invited}명 초대됨`);
       if(toInvite>0)notes.push(`${toInvite}명 더 초대하세요`);
       const accounts=g.accounts?.length
-        ? `<div class="account-chips">${g.accounts.slice(0,5).map(a=>`<code class="${a.owner?"owner":""}" title="${escapeHtml(a.name)}">${escapeHtml(a.email)}${a.owner?" · 소유자":""}</code>`).join("")}${g.accounts.length>5?`<span class="more">외 ${g.accounts.length-5}개</span>`:""}</div>`
+        ? `<div class="account-chips">${g.accounts.map(a=>`<code class="${a.owner?"owner":""}" title="${escapeHtml(a.name)}">${escapeHtml(a.email)}${a.owner?" · 소유자":""}</code>`).join("")}</div>`
         : `<div class="alloc-hint ${toInvite>0?"":"done"}">${escapeHtml(notes.join(" · ")||"초대 인원이 없습니다.")}</div>`;
       return `<div class="alloc-target"><div class="alloc-target-head"><b>${escapeHtml(rootName(g.rootId))}</b><span class="seat-count">${g.seats}${unit}</span></div>${accounts}</div>`;
     }).join(""):`<div class="alloc-target empty-target">배정 가능한 ${permanent?"상시 계정":"좌석"}이 없습니다.</div>`;
@@ -283,10 +283,35 @@ function renderAccounts(){
   }).join('')||'<div class="empty">검색 결과가 없습니다.</div>';
 }
 
+// 선택은 화면에 보이는 행에만 적용한다. 검색·필터를 바꾸면 비워서
+// "선택된 것"과 "보이는 것"이 어긋나지 않게 한다.
+let selectedGuests = new Set();
 function renderGuests(){
   const q=document.querySelector("#guestSearch").value.toLowerCase(),f=document.querySelector("#guestFilter").value;
   const rows=state.guests.filter(g=>(f==='all'||guestStatus(g)===f)&&[g.name,g.email,g.organization].join(' ').toLowerCase().includes(q));
-  document.querySelector("#guestTable").innerHTML=rows.map(g=>`<tr><td><b>${escapeHtml(g.name)}</b><small>${escapeHtml(g.email)}</small></td><td>${escapeHtml(g.organization||'-')}</td><td>${escapeHtml(rootName(g.rootId))}<small>${escapeHtml(courseTitle(g.courseId)||'강의 미지정')}</small></td><td>${g.start} → ${g.end}</td><td><span class="status ${statusClass(guestStatus(g))}">${guestStatus(g)}</span></td><td><div class="row-actions">${guestStatus(g)==='제거 필요'?`<button class="mini-button" data-remove-guest="${g.id}">제거 완료</button>`:''}<button class="mini-button" data-edit-guest="${g.id}">수정</button></div></td></tr>`).join('')||'<tr><td colspan="6" class="empty">등록된 기간제 멤버가 없습니다.</td></tr>';
+  document.querySelector("#guestTable").innerHTML=rows.map(g=>`<tr><td class="check-col"><input type="checkbox" data-guest="${g.id}" ${selectedGuests.has(g.id)?'checked':''} aria-label="${escapeHtml(g.name)} 선택"></td><td><b>${escapeHtml(g.name)}</b><small>${escapeHtml(g.email)}</small></td><td>${escapeHtml(g.organization||'-')}</td><td>${escapeHtml(rootName(g.rootId))}<small>${escapeHtml(courseTitle(g.courseId)||'강의 미지정')}</small></td><td>${g.start} → ${g.end}</td><td><span class="status ${statusClass(guestStatus(g))}">${guestStatus(g)}</span></td><td><div class="row-actions">${guestStatus(g)==='제거 필요'?`<button class="mini-button" data-remove-guest="${g.id}">제거 완료</button>`:''}<button class="mini-button" data-edit-guest="${g.id}">수정</button></div></td></tr>`).join('')||'<tr><td colspan="7" class="empty">등록된 기간제 멤버가 없습니다.</td></tr>';
+  syncGuestSelection();
+}
+function syncGuestSelection(){
+  const boxes=[...document.querySelectorAll('#guestTable input[data-guest]')];
+  const checked=boxes.filter(b=>b.checked).length;
+  const all=document.querySelector('#guestSelectAll');
+  all.checked=boxes.length>0&&checked===boxes.length;
+  all.indeterminate=checked>0&&checked<boxes.length;
+  const btn=document.querySelector('#deleteSelectedGuests');
+  btn.hidden=checked===0;
+  btn.textContent=`선택 ${checked}명 삭제`;
+}
+function deleteSelectedGuests(){
+  const targets=state.guests.filter(g=>selectedGuests.has(g.id));
+  if(!targets.length)return;
+  const names=targets.map(g=>g.name);
+  const preview=names.slice(0,5).join(', ')+(names.length>5?` 외 ${names.length-5}명`:'');
+  if(!confirm(`기간제 멤버 ${targets.length}명을 삭제합니다.\n${preview}\n\n실제 워크스페이스에서 제거했는지 먼저 확인하세요.`))return;
+  state.guests=state.guests.filter(g=>!selectedGuests.has(g.id));
+  selectedGuests.clear();
+  persist();
+  showToast(`기간제 멤버 ${targets.length}명을 삭제했습니다.`);
 }
 
 function renderCalendar(){
@@ -495,6 +520,7 @@ document.addEventListener('click',e=>{
   if(t.hasAttribute('data-open-import')){document.querySelector('#importForm').reset();document.querySelector('#importResult').className='import-result';document.querySelector('#importResult').textContent='';document.querySelector('#importDialog').showModal()}
   if(t.hasAttribute('data-close-import'))document.querySelector('#importDialog').close();
   if(t.dataset.removeGuest){const g=state.guests.find(x=>x.id===t.dataset.removeGuest);g.removedAt=isoDate(today);persist()}
+  if(t.id==='deleteSelectedGuests')deleteSelectedGuests();
   if(t.id==='quickAddButton')openEditor(currentView==='accounts'?'root':currentView==='guests'?'guest':'course');
   if(t.id==='menuButton')document.querySelector('.sidebar').classList.toggle('open');
   if(t.id==='prevMonth'){calendarDate=new Date(calendarDate.getFullYear(),calendarDate.getMonth()-1,1);renderCalendar()}
@@ -510,7 +536,19 @@ document.addEventListener('click',e=>{
 document.querySelector('#editorForm').addEventListener('submit',e=>{e.preventDefault();if(saveEditor(e.currentTarget))document.querySelector('#editorDialog').close()});
 document.querySelector('#importForm').addEventListener('submit',async e=>{e.preventDefault();const result=document.querySelector('#importResult'),file=document.querySelector('#csvFile').files[0];if(!file)return;try{const rows=parseCsv(await readCsvText(file));if(!rows.length)throw new Error('등록할 데이터가 없습니다.');const imported=importMembers(rows);if(imported.errors.length){result.className='import-result show';result.textContent=`등록 전 확인이 필요한 항목이 있습니다.\n${imported.errors.slice(0,8).join('\n')}${imported.errors.length>8?`\n외 ${imported.errors.length-8}건`:''}`;return}state.children.push(...imported.children);state.guests.push(...imported.guests);await persist();result.className='import-result show success';result.textContent=`상시 멤버 ${imported.children.length}명, 기간제 멤버 ${imported.guests.length}명을 등록했습니다.`;document.querySelector('#csvFile').value='';showToast('CSV 일괄 등록을 완료했습니다.')}catch(error){result.className='import-result show';result.textContent=error.message||'CSV 파일을 읽지 못했습니다.'}});
 ['accountSearch','accountFilter'].forEach(id=>document.querySelector(`#${id}`).addEventListener('input',renderAccounts));
-['guestSearch','guestFilter'].forEach(id=>document.querySelector(`#${id}`).addEventListener('input',renderGuests));
+['guestSearch','guestFilter'].forEach(id=>document.querySelector(`#${id}`).addEventListener('input',()=>{selectedGuests.clear();renderGuests()}));
+document.querySelector('#guestTable').addEventListener('change',e=>{
+  const box=e.target.closest('input[data-guest]');if(!box)return;
+  box.checked?selectedGuests.add(box.dataset.guest):selectedGuests.delete(box.dataset.guest);
+  syncGuestSelection();
+});
+document.querySelector('#guestSelectAll').addEventListener('change',e=>{
+  document.querySelectorAll('#guestTable input[data-guest]').forEach(box=>{
+    box.checked=e.target.checked;
+    e.target.checked?selectedGuests.add(box.dataset.guest):selectedGuests.delete(box.dataset.guest);
+  });
+  syncGuestSelection();
+});
 document.querySelector('#ownerSeatToggle').addEventListener('change',e=>{state.settings.ownerUsesSeat=e.target.checked;persist()});
 
 document.querySelector('#todayLabel').textContent=new Intl.DateTimeFormat('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'long'}).format(today);
