@@ -57,18 +57,24 @@ function showToast(message){const el=document.querySelector("#toast");el.textCon
 // ---- 좌석 계산 -------------------------------------------------------------
 // 상시 멤버는 워크스페이스 좌석을 늘 점유하고, 기간제 멤버는 초대 기간에만 점유한다.
 // 그래서 여유 좌석은 "오늘"이 아니라 "언제 기준인지"에 따라 달라진다.
-const isActiveRoot = r => r.status==="운영 중" || r.status==="종료 예정";
+// 만료일이 지난 워크스페이스는 상태값이 "운영 중"이어도 그날은 쓸 수 없다.
+// 만료일 당일까지는 사용 가능한 것으로 본다.
+const isRootActiveOn = (r, date=isoDate(today)) =>
+  (r.status==="운영 중" || r.status==="종료 예정") && (!r.expiry || date <= r.expiry);
+const isActiveRoot = r => isRootActiveOn(r);
+const isRootExpired = r => !!r.expiry && isoDate(today) > r.expiry && r.status!=="종료" && r.status!=="보관";
+const daysToExpiry = r => r.expiry ? Math.ceil((new Date(`${r.expiry}T00:00`) - new Date(isoDate(today)+"T00:00"))/DAY) : null;
 const isUsableChild = c => c.status!=="보관" && c.status!=="사용 중지";
 const isPlannedCourse = c => c.status!=="취소" && c.status!=="완료";
 
 // 워크스페이스 소유자도 실제로 쓸 수 있는 상시 계정이다. 다만 좌석을 차지하지 않는
 // 설정이면 그 워크스페이스에 자리가 없다는 뜻이므로 배정 대상에서 뺀다.
 function ownerAccount(root){return {id:`owner:${root.id}`,rootId:root.id,name:`${root.name} 소유자`,email:root.email,status:"소유자",owner:true}}
-function ownerIsMember(root){return !!state.settings.ownerUsesSeat && isActiveRoot(root)}
+function ownerIsMember(root, date=isoDate(today)){return !!state.settings.ownerUsesSeat && isRootActiveOn(root, date)}
 // 전용 상시 계정을 먼저 쓰고 관리자 계정인 소유자는 마지막에 쓰도록 뒤에 붙인다.
-function permanentAccounts(root){
+function permanentAccounts(root, date=isoDate(today)){
   const list = state.children.filter(c=>c.rootId===root.id && isUsableChild(c));
-  return ownerIsMember(root) ? [...list, ownerAccount(root)] : list;
+  return ownerIsMember(root, date) ? [...list, ownerAccount(root)] : list;
 }
 
 function activeGuests(rootId, date=isoDate(today)){return state.guests.filter(g=>g.rootId===rootId&&!g.removedAt&&g.start<=date&&g.end>=date).length}
@@ -106,9 +112,10 @@ function pickOrder(pools, need, sizeOf, preferredId){
 }
 
 function planPermanent(course, roots, need, takenAccounts){
+  const day = courseLastDay(course);
   const blocked = new Set(takenAccounts.filter(t=>coursesOverlap(t.course, course)).map(t=>t.childId));
   const pools = roots
-    .map(root=>({root, accounts: permanentAccounts(root).filter(c=>!blocked.has(c.id))}))
+    .map(root=>({root, accounts: permanentAccounts(root, day).filter(c=>!blocked.has(c.id))}))
     .filter(p=>p.accounts.length);
   const groups=[]; let left=need;
   pickOrder(pools, need, p=>p.accounts.length, course.rootId).forEach(p=>{
@@ -156,14 +163,18 @@ function planGuest(course, roots, need, takenSeats){
 }
 
 // 강의를 시작 순서대로 처리하며 좌석과 계정을 소진시킨다. 먼저 잡힌 강의가 우선권을 갖는다.
+// 강의가 끝나는 날까지 워크스페이스가 살아 있어야 그 강의에 쓸 수 있다.
+function courseLastDay(course){return dateOnly(course.end) || dateOnly(course.start)}
+
 function planAllocations(){
-  const roots = state.roots.filter(isActiveRoot);
   const takenSeats = [], takenAccounts = [], result = new Map();
   state.courses
     .filter(c=>isPlannedCourse(c) && dateOnly(c.start) >= isoDate(today))
     .sort((a,b)=>String(a.start).localeCompare(String(b.start)) || String(a.id).localeCompare(String(b.id)))
     .forEach(course=>{
       const need = Math.max(0, Number(course.required) || 0);
+      // 강의 날짜 기준으로 아직 만료되지 않은 워크스페이스만 후보가 된다.
+      const roots = state.roots.filter(r=>isRootActiveOn(r, courseLastDay(course)));
       const plan = course.memberMode==="상시"
         ? planPermanent(course, roots, need, takenAccounts)
         : planGuest(course, roots, need, takenSeats);
@@ -230,7 +241,12 @@ function renderDashboard(){
 
   const actions=[];
   state.guests.filter(g=>guestStatus(g)==="제거 필요").forEach(g=>actions.push({danger:true,title:`${g.name} 제거 필요`,sub:`${rootName(g.rootId)} · ${g.end} 종료`}));
-  state.roots.filter(r=>r.status!=="종료"&&(new Date(r.expiry)-today)/DAY<=30).forEach(r=>actions.push({danger:false,title:`${r.name} 만료 임박`,sub:`${r.expiry} · ${Math.max(0,Math.ceil((new Date(r.expiry)-today)/DAY))}일 남음`}));
+  state.roots.filter(r=>r.status!=="종료"&&r.status!=="보관"&&r.expiry&&daysToExpiry(r)<=30).forEach(r=>{
+    const left=daysToExpiry(r);
+    actions.push(left<0
+      ? {danger:true,title:`${r.name} 만료됨`,sub:`${r.expiry} · ${-left}일 지남 · 배정에서 제외 중`}
+      : {danger:false,title:`${r.name} 만료 임박`,sub:`${r.expiry} · ${left}일 남음`});
+  });
   upcomingCourses(30).forEach(c=>{const p=planOf(c);if(p.shortage>0)actions.push({danger:true,title:`${c.title} ${p.shortage}${p.mode==="상시"?"개 계정":"석"} 부족`,sub:`${fmtDateTime(c.start)} · ${p.mode} 배정`})});
   document.querySelector("#actionCount").textContent=actions.length;
   document.querySelector("#actionList").innerHTML=actions.slice(0,6).map(a=>`<div class="action-item ${a.danger?'danger':''}"><i></i><div><b>${escapeHtml(a.title)}</b><small>${escapeHtml(a.sub)}</small></div></div>`).join("")||`<div class="empty">지금 처리할 일이 없습니다.</div>`;
@@ -279,7 +295,9 @@ function renderAccounts(){
     // 소유자 계정은 워크스페이스 수정 화면에서 다루므로 목록에서는 읽기 전용으로 보여준다.
     const ownerRow=ownerIsMember(r)?`<div class="member"><span class="avatar">◆</span><div><b>${escapeHtml(r.name)} 소유자</b><small>${escapeHtml(r.email)}</small></div><span class="status neutral">소유자</span></div>`:'';
     const memberRows=ownerRow+children.map(c=>`<div class="member"><span class="avatar">${escapeHtml(c.name.slice(-2))}</span><div><b>${escapeHtml(c.name)}</b><small>${escapeHtml(c.email)}</small></div><span class="status ${statusClass(c.status)}">${c.status}</span><button class="mini-button" data-edit-child="${c.id}">수정</button></div>`).join('');
-    return `<article class="workspace-card ${r.status==='종료'?'archived':''}"><div class="workspace-head"><div class="workspace-symbol">${escapeHtml(r.name.slice(0,1))}</div><div><h3>${escapeHtml(r.name)}</h3><p>${escapeHtml(r.email)}</p></div><span class="status ${statusClass(r.status)}">${r.status}</span></div><div class="workspace-stats"><div><small>총 좌석</small><b>${r.capacity}</b></div><div><small>사용</small><b>${usedSeats(r)}</b></div><div><small>여유</small><b>${freeSeats(r)}</b></div></div><div class="member-list">${memberRows||'<div class="empty">상시 멤버가 없습니다.</div>'}</div><div class="workspace-actions"><button class="mini-button" data-add-child="${r.id}">+ 상시 멤버</button><button class="mini-button" data-edit-root="${r.id}">워크스페이스 수정</button></div></article>`;
+    const expired=isRootExpired(r);
+    const badge=expired?`<span class="status danger" title="만료일 ${escapeHtml(r.expiry)}">만료됨</span>`:`<span class="status ${statusClass(r.status)}">${r.status}</span>`;
+    return `<article class="workspace-card ${r.status==='종료'||expired?'archived':''}"><div class="workspace-head"><div class="workspace-symbol">${escapeHtml(r.name.slice(0,1))}</div><div><h3>${escapeHtml(r.name)}</h3><p>${escapeHtml(r.email)}</p>${expired?`<p class="expired-note">${escapeHtml(r.expiry)} 만료 · 배정에서 제외됩니다</p>`:''}</div>${badge}</div><div class="workspace-stats"><div><small>총 좌석</small><b>${r.capacity}</b></div><div><small>사용</small><b>${usedSeats(r)}</b></div><div><small>여유</small><b>${freeSeats(r)}</b></div></div><div class="member-list">${memberRows||'<div class="empty">상시 멤버가 없습니다.</div>'}</div><div class="workspace-actions"><button class="mini-button" data-add-child="${r.id}">+ 상시 멤버</button><button class="mini-button" data-edit-root="${r.id}">워크스페이스 수정</button></div></article>`;
   }).join('')||'<div class="empty">검색 결과가 없습니다.</div>';
 }
 
@@ -418,7 +436,7 @@ function importMembers(rows){
 // ---- 편집 다이얼로그 --------------------------------------------------------
 const field=(name,label,type='text',value='',extra='',full=false)=>`<label class="${full?'full':''}">${label}<${type==='textarea'?'textarea':'input'} name="${name}" ${type!=='textarea'?`type="${type}"`:''} value="${type==='textarea'?'':escapeHtml(value)}" ${extra}>${type==='textarea'?escapeHtml(value):''}</${type==='textarea'?'textarea':'input'}></label>`;
 const selectField=(name,label,options,value,full=false)=>`<label class="${full?'full':''}">${label}<select name="${name}">${options.map(o=>`<option ${o===value?'selected':''}>${o}</option>`).join('')}</select></label>`;
-const rootSelect=(value,label='소속 워크스페이스',allowEmpty=false)=>`<label>${label}<select name="rootId" ${allowEmpty?'':'required'}>${allowEmpty?`<option value="">자동 배정에 맡김</option>`:''}${state.roots.filter(r=>r.status!=="종료").map(r=>`<option value="${r.id}" ${r.id===value?'selected':''}>${escapeHtml(r.name)}</option>`).join('')}</select></label>`;
+const rootSelect=(value,label='소속 워크스페이스',allowEmpty=false)=>`<label>${label}<select name="rootId" ${allowEmpty?'':'required'}>${allowEmpty?`<option value="">자동 배정에 맡김</option>`:''}${state.roots.filter(r=>r.status!=="종료").map(r=>`<option value="${r.id}" ${r.id===value?'selected':''}>${escapeHtml(r.name)}${isRootExpired(r)?' (만료됨)':''}</option>`).join('')}</select></label>`;
 const courseSelect=(value)=>`<label>연결 강의<select name="courseId"><option value="">지정 안 함</option>${state.courses.filter(c=>c.status!=='취소').sort((a,b)=>String(b.start).localeCompare(String(a.start))).map(c=>`<option value="${c.id}" ${c.id===value?'selected':''}>${escapeHtml(c.title)} · ${dateOnly(c.start)}</option>`).join('')}</select></label>`;
 
 function openEditor(type,id=null,parentId=null){

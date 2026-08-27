@@ -44,6 +44,7 @@ td.check-col{vertical-align:middle}
 /* 툴바 버튼이 늘어나도 넘치지 않도록 어느 폭에서든 줄바꿈을 허용한다. */
 .section-tools{flex-wrap:wrap}
 .search{flex:1 1 240px;min-width:240px}
+.expired-note{margin:4px 0 0!important;font-size:10px;color:var(--ink)!important;font-weight:700}
 .account-chips .more{font-size:9px;color:var(--muted);align-self:center}
 .alloc-hint{margin-top:5px;font-size:10px;color:var(--muted)}
 .alloc-hint.done{color:var(--blue);font-weight:600}
