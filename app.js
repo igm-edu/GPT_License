@@ -189,6 +189,21 @@ function planOf(course){
 }
 function courseLevel(c){const p=plans.get(c.id);if(!p)return "ok";return p.shortage<=0?"ok":p.filled>0?"warn":"danger"}
 // days를 생략하면 기간 제한 없이 다가오는 강의를 전부 돌려준다.
+// 날짜별로 그날 모자란 좌석을 합산한다. 여러 날에 걸친 강의는 그 기간 내내
+// 좌석을 잡으므로 걸쳐 있는 모든 날에 더한다.
+function dailyShortage(days=30){
+  const limit=addDays(days), byDay=new Map();
+  upcomingCourses(days).forEach(c=>{
+    const p=planOf(c); if(p.shortage<=0) return;
+    let d=dateOnly(c.start); const end=dateOnly(c.end)||d;
+    for(let i=0;i<366 && d<=end && d<=limit;i++){
+      byDay.set(d,(byDay.get(d)||0)+p.shortage);
+      d=isoDate(new Date(`${d}T00:00`).getTime()+DAY);
+    }
+  });
+  return byDay;
+}
+
 function upcomingCourses(days){
   const limit = days==null ? null : addDays(days);
   return state.courses
@@ -231,12 +246,15 @@ function renderDashboard(){
   const totalCapacity=activeRoots.reduce((a,r)=>a+Number(r.capacity),0), used=activeRoots.reduce((a,r)=>a+usedSeats(r),0);
   const activeGuestCount=state.guests.filter(g=>guestStatus(g)==="이용 중").length;
   const horizon=upcomingCourses(30).map(c=>planOf(c));
-  // 강의마다 부족분을 따로 채워야 하므로 최대값이 아니라 합계가 실제로 모자란 양이다.
-  const totalShortage=horizon.reduce((a,p)=>a+p.shortage,0);
+  // 좌석은 강의가 끝나면 회수되므로 전 기간 합계가 아니라 "가장 빠듯한 하루"가
+  // 실제로 확보해야 하는 양이다. 같은 날 강의들의 부족분만 합쳐서 그중 최대를 쓴다.
+  const daily=dailyShortage(30);
+  const peakShortage=Math.max(0,...daily.values(),0);
+  const peakDay=[...daily.entries()].find(([,v])=>v===peakShortage&&v>0)?.[0];
   const shortCourses=horizon.filter(p=>p.shortage>0).length;
-  document.querySelector("#heroShortage").textContent=totalShortage;
-  document.querySelector("#heroNote").textContent=shortCourses
-    ?`${shortCourses}개 강의에서 모두 ${totalShortage}석이 모자랍니다.`
+  document.querySelector("#heroShortage").textContent=peakShortage;
+  document.querySelector("#heroNote").textContent=peakDay
+    ?`${fmtDate(peakDay)}에 ${peakShortage}석이 한꺼번에 모자랍니다. 부족한 강의 ${shortCourses}개.`
     :"향후 30일 강의는 모두 배정 가능합니다.";
   const cards=[['워크스페이스',activeRoots.length,'운영 중','▦'],['전체 좌석',totalCapacity,`${used}석 사용 중`,'◫'],['여유 좌석',Math.max(0,totalCapacity-used),'오늘 기준','↗'],['이용 중 게스트',activeGuestCount,'기간제 멤버','♙']];
   document.querySelector("#metrics").innerHTML=cards.map(x=>`<article class="metric"><div class="metric-head"><span>${x[0]}</span><i class="metric-icon">${x[3]}</i></div><strong>${x[1]}</strong><small>${x[2]}</small></article>`).join("");
