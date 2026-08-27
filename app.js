@@ -231,10 +231,13 @@ function renderDashboard(){
   const totalCapacity=activeRoots.reduce((a,r)=>a+Number(r.capacity),0), used=activeRoots.reduce((a,r)=>a+usedSeats(r),0);
   const activeGuestCount=state.guests.filter(g=>guestStatus(g)==="이용 중").length;
   const horizon=upcomingCourses(30).map(c=>planOf(c));
-  const maxShortage=Math.max(0,...horizon.map(p=>p.shortage));
+  // 강의마다 부족분을 따로 채워야 하므로 최대값이 아니라 합계가 실제로 모자란 양이다.
+  const totalShortage=horizon.reduce((a,p)=>a+p.shortage,0);
   const shortCourses=horizon.filter(p=>p.shortage>0).length;
-  document.querySelector("#heroShortage").textContent=maxShortage;
-  document.querySelector("#heroNote").textContent=shortCourses?`${shortCourses}개 강의가 좌석을 다 채우지 못했습니다.`:"향후 30일 강의는 모두 배정 가능합니다.";
+  document.querySelector("#heroShortage").textContent=totalShortage;
+  document.querySelector("#heroNote").textContent=shortCourses
+    ?`${shortCourses}개 강의에서 모두 ${totalShortage}석이 모자랍니다.`
+    :"향후 30일 강의는 모두 배정 가능합니다.";
   const cards=[['워크스페이스',activeRoots.length,'운영 중','▦'],['전체 좌석',totalCapacity,`${used}석 사용 중`,'◫'],['여유 좌석',Math.max(0,totalCapacity-used),'오늘 기준','↗'],['이용 중 게스트',activeGuestCount,'기간제 멤버','♙']];
   document.querySelector("#metrics").innerHTML=cards.map(x=>`<article class="metric"><div class="metric-head"><span>${x[0]}</span><i class="metric-icon">${x[3]}</i></div><strong>${x[1]}</strong><small>${x[2]}</small></article>`).join("");
   document.querySelector("#capacityList").innerHTML=activeRoots.map(r=>{const u=usedSeats(r),cap=Math.max(1,Number(r.capacity)),pct=Math.min(100,Math.round(u/cap*100));return `<div class="capacity-row"><div class="capacity-name"><b>${escapeHtml(r.name)}</b><small>${escapeHtml(r.email)}</small></div><div class="bar"><i class="${pct>=85?'high':''}" style="width:${pct}%"></i></div><div class="capacity-num"><b>${u}</b> / ${r.capacity}</div></div>`}).join("")||`<div class="empty">등록된 워크스페이스가 없습니다.</div>`;
