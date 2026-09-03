@@ -113,7 +113,9 @@ function pickOrder(pools, need, sizeOf, preferredId){
 
 function planPermanent(course, roots, need, takenAccounts){
   const day = courseLastDay(course);
-  const blocked = new Set(takenAccounts.filter(t=>coursesOverlap(t.course, course)).map(t=>t.childId));
+  const blocked = new Set(takenAccounts
+    .filter(t=>t.wholeDay ? courseDaysOverlap(t.course, course) : coursesOverlap(t.course, course))
+    .map(t=>t.childId));
   const pools = roots
     .map(root=>({root, accounts: permanentAccounts(root, day).filter(c=>!blocked.has(c.id))}))
     .filter(p=>p.accounts.length);
@@ -128,8 +130,8 @@ function planPermanent(course, roots, need, takenAccounts){
   return {mode:"상시", need, filled:need-left, shortage:left, groups};
 }
 
-function planGuest(course, roots, need, takenSeats){
-  const from = dateOnly(course.start), to = dateOnly(course.end) || from;
+function planGuest(course, roots, need, takenSeats, takenAccounts){
+  const from = dateOnly(course.start), to = courseLastDay(course);
   // 이 강의로 이미 초대된 기간제 멤버는 좌석을 쓰는 동시에 이 강의의 배정분이다.
   // 남은 인원에서 빼지 않으면 같은 사람을 두 번 세어 좌석이 부족한 것처럼 보인다.
   const placed = new Map();
@@ -147,16 +149,27 @@ function planGuest(course, roots, need, takenSeats){
 
   const pools = roots.map(root=>{
     const reserved = takenSeats.filter(t=>t.rootId===root.id && courseDaysOverlap(t.course, course)).reduce((a,t)=>a+t.seats, 0);
-    const free = Math.min(freeSeatsOn(root, from), freeSeatsOn(root, to)) - reserved;
-    return {root, free: Math.max(0, free)};
+    const plain = Math.max(0, Math.min(freeSeatsOn(root, from), freeSeatsOn(root, to)) - reserved);
+    // 소유자 계정은 좌석 하나를 차지하지만 그 계정 자체를 수강생에게 내줄 수 있다.
+    // 그래서 기간제 배정에서도 한 자리로 친다. 같은 기간 다른 강의가 이미
+    // 그 계정을 가져갔다면 중복이므로 뺀다.
+    const ownerFree = ownerIsMember(root, to)
+      && !takenAccounts.some(t=>t.childId===`owner:${root.id}` && courseDaysOverlap(t.course, course));
+    return {root, plain, ownerFree, free: plain + (ownerFree?1:0)};
   }).filter(p=>p.free>0);
 
   let left = Math.max(0, need - placedTotal);
   pickOrder(pools, left, p=>p.free, course.rootId).forEach(p=>{
     if(left<=0) return;
     const seats = Math.min(left, p.free);
-    takenSeats.push({rootId:p.root.id, course, seats});
-    groupFor(p.root.id).seats += seats;
+    // 빈 좌석을 다 쓰고 넘어가는 한 자리가 소유자 계정이다.
+    const usesOwner = p.ownerFree && seats > p.plain;
+    const inviteSeats = usesOwner ? seats - 1 : seats;
+    if(inviteSeats > 0) takenSeats.push({rootId:p.root.id, course, seats:inviteSeats});
+    if(usesOwner) takenAccounts.push({childId:`owner:${p.root.id}`, course, wholeDay:true});
+    const g = groupFor(p.root.id);
+    g.seats += seats;
+    if(usesOwner) g.usesOwner = true;
     left -= seats;
   });
   return {mode:"기간제", need, filled:need-left, shortage:left, groups, invited:placedTotal};
@@ -177,7 +190,7 @@ function planAllocations(){
       const roots = state.roots.filter(r=>isRootActiveOn(r, courseLastDay(course)));
       const plan = course.memberMode==="상시"
         ? planPermanent(course, roots, need, takenAccounts)
-        : planGuest(course, roots, need, takenSeats);
+        : planGuest(course, roots, need, takenSeats, takenAccounts);
       course.assigned = plan.filled;
       result.set(course.id, plan);
     });
@@ -283,9 +296,12 @@ function renderAllocations(){
     const p=planOf(c), permanent=p.mode==="상시", unit=permanent?"개":"석";
     const registered=state.guests.filter(g=>g.courseId===c.id&&!g.removedAt).length;
     const targets=p.groups.length?p.groups.map(g=>{
-      const toInvite=g.seats-(g.invited||0), notes=[];
+      // 소유자 계정 자리는 초대가 아니라 계정을 내주는 것이라 따로 안내한다.
+      const ownerSlot=g.usesOwner?1:0;
+      const toInvite=g.seats-(g.invited||0)-ownerSlot, notes=[];
       if(g.invited)notes.push(`이미 ${g.invited}명 초대됨`);
       if(toInvite>0)notes.push(`${toInvite}명 더 초대하세요`);
+      if(ownerSlot)notes.push(`소유자 계정 1개 사용`);
       const accounts=g.accounts?.length
         ? `<div class="account-chips">${g.accounts.map(a=>`<code class="${a.owner?"owner":""}" title="${escapeHtml(a.name)}">${escapeHtml(a.email)}${a.owner?" · 소유자":""}</code>`).join("")}</div>`
         : `<div class="alloc-hint ${toInvite>0?"":"done"}">${escapeHtml(notes.join(" · ")||"초대 인원이 없습니다.")}</div>`;
