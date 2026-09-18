@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#0f1720">
-  <title>GPT Business 운영대장</title>
+  <title>GPT Business 계정 일정</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -13,20 +13,17 @@
 <body>
   <div class="app-shell">
     <aside class="sidebar">
-      <a class="brand" href="#dashboard" aria-label="대시보드로 이동">
+      <a class="brand" href="#roster" aria-label="계정 일정으로 이동">
         <span class="brand-mark">G</span>
-        <span><b>GPT Business</b><small>운영대장</small></span>
+        <span><b>GPT Business</b><small>계정 일정</small></span>
       </a>
       <nav class="nav" aria-label="주요 메뉴">
-        <button class="nav-item active" data-view="dashboard"><span>⌂</span> 대시보드</button>
-        <button class="nav-item" data-view="accounts"><span>▦</span> 워크스페이스</button>
-        <button class="nav-item" data-view="courses"><span>□</span> 강의 일정</button>
-        <button class="nav-item" data-view="guests"><span>♙</span> 기간제 멤버</button>
+        <button class="nav-item active" data-view="roster"><span>▤</span> 계정 일정</button>
         <button class="nav-item" data-view="settings"><span>⚙</span> 연결 설정</button>
       </nav>
       <div class="sidebar-foot">
         <div class="sync-dot" id="syncDot"></div>
-        <span id="syncLabel">로컬 데모 데이터</span>
+        <span id="syncLabel">로컬 데이터</span>
       </div>
     </aside>
 
@@ -35,87 +32,66 @@
         <button class="menu-button" id="menuButton" aria-label="메뉴 열기">☰</button>
         <div>
           <p class="eyebrow" id="todayLabel"></p>
-          <h1 id="pageTitle">운영 현황</h1>
+          <h1 id="pageTitle">계정 일정</h1>
         </div>
         <div class="top-actions">
           <button class="button ghost" id="refreshButton">새로고침</button>
-          <button class="button primary" id="quickAddButton">+ 새 항목</button>
+          <button class="button primary" id="pasteButton">엑셀 붙여넣기</button>
         </div>
       </header>
 
-      <section class="view active" id="dashboardView">
+      <section class="view active" id="rosterView">
         <div class="hero">
           <div>
-            <span class="pill">TODAY'S OPERATIONS</span>
-            <h2>오늘 필요한 조치를<br>한눈에 확인하세요.</h2>
-            <p>워크스페이스 좌석, 강의 일정, 기간제 멤버 만료를 한곳에서 관리합니다.</p>
+            <span class="pill">ACCOUNT SCHEDULE</span>
+            <h2>날짜별로 쓸 계정을<br>그대로 적어 두세요.</h2>
+            <p>엑셀에서 복사해 붙여넣으면 날짜별로 나눠서 정리합니다. 지난 날짜는 자동으로 접힙니다.</p>
             <p class="hero-note" id="heroNote"></p>
           </div>
           <div class="hero-stat">
-            <span>하루 최대 부족 좌석</span>
-            <strong id="heroShortage">0</strong>
-            <small>seat shortage</small>
+            <span>다가오는 일정</span>
+            <strong id="heroDays">0</strong>
+            <small>days</small>
           </div>
         </div>
 
         <div class="metrics" id="metrics"></div>
 
-        <div class="dashboard-grid">
-          <article class="card span-2">
-            <div class="card-head"><div><p class="eyebrow">CAPACITY</p><h3>워크스페이스 좌석 현황</h3></div><button class="text-button" data-go="accounts">전체 보기 →</button></div>
-            <div id="capacityList" class="capacity-list"></div>
-          </article>
-          <article class="card attention-card">
-            <div class="card-head"><div><p class="eyebrow">ACTION NEEDED</p><h3>처리할 일</h3></div><span class="count-badge" id="actionCount">0</span></div>
-            <div id="actionList" class="action-list"></div>
-          </article>
-          <article class="card span-3">
-            <div class="card-head">
-              <div><p class="eyebrow">AUTO ASSIGNMENT</p><h3>강의별 자동 배정 계획</h3></div>
-              <button class="text-button" data-go="courses">캘린더 보기 →</button>
-            </div>
-            <p class="card-note">강의마다 고른 멤버 종류에 따라 <b>상시 멤버는 사용할 계정</b>을, <b>기간제 멤버는 초대할 워크스페이스</b>를 자동으로 배정합니다. 앞선 강의가 먼저 좌석을 가져갑니다.</p>
-            <div id="allocationList" class="alloc-list"></div>
-            <p id="allocationMore" class="alloc-more"></p>
-          </article>
-        </div>
-      </section>
-
-      <section class="view" id="accountsView">
         <div class="section-tools">
-          <div class="search"><span>⌕</span><input id="accountSearch" placeholder="워크스페이스 또는 멤버 검색"></div>
-          <select id="accountFilter"><option value="all">전체 상태</option><option value="운영 중">운영 중</option><option value="종료 예정">종료 예정</option><option value="종료">종료</option></select>
-          <button class="button ghost" data-open-import>CSV 일괄 등록</button>
-          <button class="button primary" data-add="root">+ 워크스페이스</button>
+          <div class="search"><span>⌕</span><input id="rosterSearch" placeholder="과정명, 이름, 계정 검색"></div>
+          <label class="check-inline"><input type="checkbox" id="showPast"> <span id="showPastLabel">지난 날짜 보기</span></label>
+          <button class="button ghost danger-text" id="deleteSelected" hidden>선택 삭제</button>
+          <button class="button ghost" id="addSlotButton">+ 계정 추가</button>
         </div>
-        <div id="workspaceGrid" class="workspace-grid"></div>
-      </section>
 
-      <section class="view" id="coursesView">
-        <div class="section-tools calendar-tools">
-          <div class="month-switch"><button id="prevMonth" aria-label="이전 달">←</button><strong id="monthLabel"></strong><button id="nextMonth" aria-label="다음 달">→</button></div>
-          <div class="legend"><span><i class="ok"></i> 충족</span><span><i class="warn"></i> 일부 미배정</span><span><i class="danger"></i> 부족</span></div>
-          <button class="button primary" data-add="course">+ 강의 일정</button>
-        </div>
-        <article class="card calendar-card"><div class="calendar-week"><span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div><div class="calendar" id="calendar"></div></article>
-      </section>
-
-      <section class="view" id="guestsView">
-        <div class="section-tools">
-          <div class="search"><span>⌕</span><input id="guestSearch" placeholder="이름, 이메일, 소속 검색"></div>
-          <select id="guestFilter"><option value="all">전체 상태</option><option value="초대 예정">초대 예정</option><option value="이용 중">이용 중</option><option value="제거 필요">제거 필요</option><option value="제거 완료">제거 완료</option></select>
-          <button class="button ghost danger-text" id="deleteSelectedGuests" hidden>선택 삭제</button>
-          <button class="button ghost" data-open-import>CSV 일괄 등록</button>
-          <button class="button primary" data-add="guest">+ 기간제 멤버</button>
-        </div>
-        <article class="card"><div class="table-wrap"><table><thead><tr><th class="check-col"><input type="checkbox" id="guestSelectAll" aria-label="화면에 보이는 기간제 멤버 전체 선택"></th><th>멤버</th><th>소속</th><th>워크스페이스</th><th>이용 기간</th><th>상태</th><th></th></tr></thead><tbody id="guestTable"></tbody></table></div></article>
+        <div id="dateList" class="date-list"></div>
       </section>
 
       <section class="view" id="settingsView">
         <div class="settings-grid">
-          <article class="card settings-card"><p class="eyebrow">DATA SOURCE</p><h3>Google Sheets 연결</h3><p>배포한 Apps Script 웹 앱 URL을 입력하면 이 브라우저의 데이터 원본으로 사용합니다.</p><label>Apps Script URL<input id="apiUrlInput" type="url" placeholder="https://script.google.com/macros/s/.../exec"></label><div class="button-row"><button class="button primary" id="saveSettings">연결 저장</button><button class="button ghost danger-text" id="disconnectButton">연결 해제</button></div><p class="hint" id="connectionHint">현재 예시 데이터를 사용 중입니다.</p></article>
-          <article class="card settings-card"><p class="eyebrow">SEAT POLICY</p><h3>소유자 좌석 계산</h3><p>워크스페이스 소유자도 유료 좌석을 차지하는 경우 계산에 포함하세요. 좌석을 가진 소유자 계정은 강의에 배정할 수 있는 상시 계정으로도 함께 잡힙니다.</p><label class="toggle-row"><span><b>Root 소유자 1석 포함</b><small>각 활성 워크스페이스마다 1석을 더 사용하고, 소유자 계정을 상시 배정 대상에 포함</small></span><input id="ownerSeatToggle" type="checkbox"><i></i></label></article>
-          <article class="card settings-card span-2"><p class="eyebrow">DEPLOYMENT</p><h3>GitHub Pages 배포 준비 완료</h3><p>이 프로젝트는 빌드 서버가 필요 없는 정적 HTML/CSS/JavaScript로 구성되어 있습니다. 저장소의 GitHub Pages를 “GitHub Actions” 소스로 선택하면 <code>main</code> 브랜치 변경 시 자동 배포됩니다.</p></article>
+          <article class="card settings-card">
+            <p class="eyebrow">DATA SOURCE</p><h3>Google Sheets 연결</h3>
+            <p>배포한 Apps Script 웹 앱 URL을 입력하면 이 브라우저의 데이터 원본으로 사용합니다.</p>
+            <label>Apps Script URL<input id="apiUrlInput" type="url" placeholder="https://script.google.com/macros/s/.../exec"></label>
+            <div class="button-row">
+              <button class="button primary" id="saveSettings">연결 저장</button>
+              <button class="button ghost danger-text" id="disconnectButton">연결 해제</button>
+            </div>
+            <p class="hint" id="connectionHint"></p>
+          </article>
+          <article class="card settings-card">
+            <p class="eyebrow">DATA</p><h3>데이터 내보내기</h3>
+            <p>화면에 보이는 일정을 엑셀에 붙여넣을 수 있는 형태로 복사합니다. 지난 날짜를 함께 보려면 목록 위의 <b>지난 날짜 보기</b>를 켜세요.</p>
+            <div class="button-row">
+              <button class="button ghost" id="copyAllButton">전체 복사</button>
+              <button class="button ghost danger-text" id="clearPastButton">지난 날짜 모두 삭제</button>
+            </div>
+            <p class="hint">복사하면 <code>날짜 · 과정명 · 이름 · 계정 · 메모</code> 순서의 탭 구분 표로 만들어집니다.</p>
+          </article>
+          <article class="card settings-card span-2">
+            <p class="eyebrow">SHEET</p><h3>시트 구성</h3>
+            <p>계정 일정은 <code>slots</code> 시트에 저장됩니다. 기존의 <code>roots</code>, <code>children</code>, <code>guests</code>, <code>courses</code> 시트는 건드리지 않고 그대로 보존합니다.</p>
+          </article>
         </div>
       </section>
     </main>
@@ -123,28 +99,38 @@
 
   <dialog id="editorDialog">
     <form method="dialog" id="editorForm">
-      <div class="dialog-head"><div><p class="eyebrow" id="dialogEyebrow">NEW RECORD</p><h2 id="dialogTitle">새 항목</h2></div><button type="button" class="icon-button" data-close-editor aria-label="닫기">×</button></div>
+      <div class="dialog-head"><div><p class="eyebrow" id="dialogEyebrow">NEW RECORD</p><h2 id="dialogTitle">계정 추가</h2></div><button type="button" class="icon-button" data-close-editor aria-label="닫기">×</button></div>
       <div id="formFields" class="form-grid"></div>
-      <div class="dialog-actions"><button type="button" class="button ghost danger-text" id="deleteRecord" hidden>삭제</button><button type="button" class="button ghost" data-close-editor>취소</button><button type="submit" class="button primary">저장</button></div>
-    </form>
-  </dialog>
-  <dialog id="importDialog">
-    <form id="importForm">
-      <div class="dialog-head"><div><p class="eyebrow">BULK IMPORT</p><h2>멤버 CSV 일괄 등록</h2></div><button type="button" class="icon-button" data-close-import aria-label="닫기">×</button></div>
-      <div class="import-guide">
-        <p>상시·기간제 멤버를 한 CSV 파일에 함께 입력할 수 있습니다. <b>워크스페이스 소유자 이메일</b>로 소속을 연결합니다.</p>
-        <a class="button ghost download-button" href="member-import-sample.csv" download>예시 CSV 다운로드</a>
+      <div class="dialog-actions">
+        <button type="button" class="button ghost danger-text" id="deleteRecord" hidden>삭제</button>
+        <button type="button" class="button ghost" data-close-editor>취소</button>
+        <button type="submit" class="button primary">저장</button>
       </div>
-      <label class="file-drop" for="csvFile">
-        <span>CSV 파일 선택</span>
-        <small>UTF-8 · CP949 자동 인식 · 첫 행은 열 이름</small>
-        <input id="csvFile" name="csvFile" type="file" accept=".csv,text/csv" required>
-      </label>
-      <div class="import-columns"><b>필수 열</b><code>member_type, email, workspace_email</code><small>기간제 멤버는 <code>course</code>에 강의명(또는 강의 id)을 넣으면 그 강의로 연결되고 초대 기간도 강의 일정으로 채워집니다. 강의를 지정하지 않을 때만 <code>start</code>, <code>end</code>가 필요합니다. 이름이 비어 있으면 이메일 앞부분을 사용합니다.</small></div>
-      <div id="importResult" class="import-result" aria-live="polite"></div>
-      <div class="dialog-actions"><button type="button" class="button ghost" data-close-import>취소</button><button type="submit" class="button primary">등록하기</button></div>
     </form>
   </dialog>
+
+  <dialog id="pasteDialog">
+    <form id="pasteForm">
+      <div class="dialog-head"><div><p class="eyebrow">EXCEL PASTE</p><h2>엑셀에서 붙여넣기</h2></div><button type="button" class="icon-button" data-close-paste aria-label="닫기">×</button></div>
+      <p class="card-note">엑셀에서 표를 그대로 복사해 아래 칸에 붙여넣으세요. <b>머리글에 날짜가 있으면</b> 날짜별로 알아서 나눕니다. 날짜 머리글이 없으면 아래에서 날짜를 골라 주세요.</p>
+      <div class="form-grid">
+        <label>날짜 머리글이 없을 때 쓸 날짜<input type="date" id="pasteDate"></label>
+        <label>처리 방식<select id="pasteMode">
+          <option value="replace">해당 날짜를 이 내용으로 교체</option>
+          <option value="append">기존 목록에 추가</option>
+        </select></label>
+      </div>
+      <label class="paste-area">붙여넣기
+        <textarea id="pasteInput" rows="8" placeholder="엑셀에서 복사한 뒤 Ctrl+V"></textarea>
+      </label>
+      <div id="pasteResult" class="import-result" aria-live="polite"></div>
+      <div class="dialog-actions">
+        <button type="button" class="button ghost" data-close-paste>취소</button>
+        <button type="submit" class="button primary">등록하기</button>
+      </div>
+    </form>
+  </dialog>
+
   <div class="toast" id="toast" role="status"></div>
   <script src="config.js"></script>
   <script src="app.js"></script>

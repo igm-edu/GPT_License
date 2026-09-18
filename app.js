@@ -1,610 +1,470 @@
 const DAY = 86400000;
 const today = new Date();
 const isoDate = d => {const date=new Date(d);return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`};
+const TODAY = isoDate(today);
 const addDays = n => isoDate(new Date(today.getTime() + n * DAY));
 const uid = prefix => `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const escapeHtml = value => String(value ?? "").replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
-const dateOnly = value => String(value ?? "").slice(0, 10);
-
-const MEMBER_MODES = ["기간제","상시"];
-const CHILD_STATUS = ["사용 가능","사용 중","사용 예정","사용 중지","보관"];
-const ROOT_STATUS = ["운영 중","종료 예정","종료","보관"];
-const COURSE_STATUS = ["예정","확정","진행","완료","취소"];
+const pad2 = v => String(v).padStart(2, "0");
 
 const demoData = {
-  roots: [
-    {id:"r1",name:"AI 교육 1팀",email:"owner-a@example.com",billingDay:12,expiry:addDays(18),capacity:25,status:"운영 중",memo:""},
-    {id:"r2",name:"AI 교육 2팀",email:"owner-b@example.com",billingDay:25,expiry:addDays(71),capacity:18,status:"운영 중",memo:""},
-    {id:"r3",name:"실습 예비 워크스페이스",email:"owner-c@example.com",billingDay:3,expiry:addDays(9),capacity:12,status:"종료 예정",memo:"갱신 여부 확인"}
+  slots: [
+    {id:"s1",date:addDays(3),course:"태림페이퍼",name:"김동주",account:"coramdeo0916@example.com",memo:""},
+    {id:"s2",date:addDays(3),course:"태림페이퍼",name:"김윤정",account:"kyja_a@example.com",memo:""},
+    {id:"s3",date:addDays(3),course:"태림페이퍼",name:"김주원",account:"juwonhaha@example.com",memo:""},
+    {id:"s4",date:addDays(4),course:"현대해상",name:"이재욱",account:"wodnr123dla@example.com",memo:""},
+    {id:"s5",date:addDays(4),course:"현대해상",name:"이정섭",account:"jeongseob82@example.com",memo:""},
+    {id:"s6",date:addDays(-2),course:"아그네스",name:"정의웅",account:"a01027825612@example.com",memo:"지난 일정"}
   ],
-  children: [
-    {id:"c1",rootId:"r1",name:"교육 운영 01",email:"member01@example.com",status:"사용 중"},{id:"c2",rootId:"r1",name:"교육 운영 02",email:"member02@example.com",status:"사용 가능"},{id:"c3",rootId:"r1",name:"교육 운영 03",email:"member03@example.com",status:"사용 중"},{id:"c4",rootId:"r2",name:"실습 계정 01",email:"lab01@example.com",status:"사용 가능"},{id:"c5",rootId:"r2",name:"실습 계정 02",email:"lab02@example.com",status:"사용 중"},{id:"c6",rootId:"r3",name:"예비 계정 01",email:"reserve01@example.com",status:"사용 가능"}
-  ],
-  guests: [
-    {id:"g1",name:"김민서",email:"minseo@example.com",organization:"ABC 교육원",rootId:"r1",courseId:"co1",start:addDays(-2),end:addDays(3),removedAt:"",memo:""},
-    {id:"g2",name:"박준호",email:"junho@example.com",organization:"XYZ 연구소",rootId:"r2",courseId:"co2",start:addDays(-8),end:addDays(-1),removedAt:"",memo:"제거 확인 필요"},
-    {id:"g3",name:"이서윤",email:"seoyun@example.com",organization:"개인",rootId:"r1",courseId:"co3",start:addDays(6),end:addDays(8),removedAt:"",memo:""}
-  ],
-  courses: [
-    {id:"co1",title:"생성형 AI 실무 과정",start:`${addDays(2)}T10:00`,end:`${addDays(2)}T17:00`,required:20,assigned:0,memberMode:"기간제",rootId:"r1",manager:"정우진",status:"확정",memo:""},
-    {id:"co2",title:"GPT 업무자동화 워크숍",start:`${addDays(6)}T09:30`,end:`${addDays(6)}T16:00`,required:4,assigned:0,memberMode:"상시",rootId:"",manager:"한유리",status:"확정",memo:""},
-    {id:"co3",title:"프롬프트 디자인 기초",start:`${addDays(8)}T13:00`,end:`${addDays(8)}T18:00`,required:24,assigned:0,memberMode:"기간제",rootId:"",manager:"강지훈",status:"예정",memo:"추가 좌석 검토"}
-  ],
-  settings:{ownerUsesSeat:true}
+  settings:{}
 };
 
 let state = loadLocal();
-let currentView = "dashboard";
-let calendarDate = new Date(today.getFullYear(), today.getMonth(), 1);
+let currentView = "roster";
 let editing = null;
-let plans = new Map();
+let selected = new Set();
 
 function loadLocal(){try{return JSON.parse(localStorage.getItem("gpt-account-manager-data")) || structuredClone(demoData)}catch{return structuredClone(demoData)}}
+
 // localStorage에 키가 있으면 빈 문자열이라도 그 값을 쓴다. 빈 문자열은 "이 브라우저에서는
 // 연결하지 않겠다"는 명시적 표시라서, config.js 기본값으로 되돌아가면 안 된다.
 const API_KEY = "gpt-account-manager-api";
 function defaultApiUrl(){return window.APP_CONFIG?.appsScriptUrl || ""}
 function apiUrl(){const saved=localStorage.getItem(API_KEY);return saved!==null?saved:defaultApiUrl()}
 function apiSource(){const saved=localStorage.getItem(API_KEY);return saved===null?(defaultApiUrl()?"default":"none"):(saved?"custom":"off")}
-function rootName(id){return state.roots.find(r=>r.id===id)?.name || "미지정"}
-function courseTitle(id){return state.courses.find(c=>c.id===id)?.title || ""}
-function guestStatus(g){if(g.removedAt)return "제거 완료";const d=isoDate(today);if(g.end<d)return "제거 필요";if(g.start>d)return "초대 예정";return "이용 중"}
-function statusClass(s){return ["제거 필요","종료","취소"].includes(s)?"danger":["종료 예정","초대 예정","예정","사용 중지"].includes(s)?"warn":["제거 완료","완료","보관"].includes(s)?"neutral":""}
-function fmtDate(d){return new Intl.DateTimeFormat("ko-KR",{month:"short",day:"numeric",weekday:"short"}).format(new Date(d))}
-function fmtDateTime(d){return new Intl.DateTimeFormat("ko-KR",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(d))}
+
 function showToast(message){const el=document.querySelector("#toast");el.textContent=message;el.classList.add("show");setTimeout(()=>el.classList.remove("show"),2200)}
+function fmtDay(d){return new Intl.DateTimeFormat("ko-KR",{month:"long",day:"numeric",weekday:"short"}).format(new Date(`${d}T00:00`))}
+function daysFromToday(d){return Math.round((new Date(`${d}T00:00`) - new Date(`${TODAY}T00:00`))/DAY)}
+function dLabel(d){const n=daysFromToday(d);return n===0?"오늘":n>0?`D-${n}`:`${-n}일 전`}
 
-// ---- 좌석 계산 -------------------------------------------------------------
-// 상시 멤버는 워크스페이스 좌석을 늘 점유하고, 기간제 멤버는 초대 기간에만 점유한다.
-// 그래서 여유 좌석은 "오늘"이 아니라 "언제 기준인지"에 따라 달라진다.
-// 만료일이 지난 워크스페이스는 상태값이 "운영 중"이어도 그날은 쓸 수 없다.
-// 만료일 당일까지는 사용 가능한 것으로 본다.
-const isRootActiveOn = (r, date=isoDate(today)) =>
-  (r.status==="운영 중" || r.status==="종료 예정") && (!r.expiry || date <= r.expiry);
-const isActiveRoot = r => isRootActiveOn(r);
-const isRootExpired = r => !!r.expiry && isoDate(today) > r.expiry && r.status!=="종료" && r.status!=="보관";
-const daysToExpiry = r => r.expiry ? Math.ceil((new Date(`${r.expiry}T00:00`) - new Date(isoDate(today)+"T00:00"))/DAY) : null;
-const isUsableChild = c => c.status!=="보관" && c.status!=="사용 중지";
-const isPlannedCourse = c => c.status!=="취소" && c.status!=="완료";
-
-// 워크스페이스 소유자도 실제로 쓸 수 있는 상시 계정이다. 다만 좌석을 차지하지 않는
-// 설정이면 그 워크스페이스에 자리가 없다는 뜻이므로 배정 대상에서 뺀다.
-function ownerAccount(root){return {id:`owner:${root.id}`,rootId:root.id,name:`${root.name} 소유자`,email:root.email,status:"소유자",owner:true}}
-function ownerIsMember(root, date=isoDate(today)){return !!state.settings.ownerUsesSeat && isRootActiveOn(root, date)}
-// 전용 상시 계정을 먼저 쓰고 관리자 계정인 소유자는 마지막에 쓰도록 뒤에 붙인다.
-function permanentAccounts(root, date=isoDate(today)){
-  const list = state.children.filter(c=>c.rootId===root.id && isUsableChild(c));
-  return ownerIsMember(root, date) ? [...list, ownerAccount(root)] : list;
+// ---- 날짜 해석 --------------------------------------------------------------
+// 엑셀에서 온 "09월 21일(월)", "2026-09-21", "9/21" 같은 표기를 모두 받아들인다.
+function parseDateCell(raw){
+  const text = String(raw ?? "").trim();
+  if(!text) return "";
+  let m = text.match(/(\d{4})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})/);
+  if(m) return valid(+m[1], +m[2], +m[3]);
+  m = text.match(/(\d{1,2})\s*[-./월]\s*(\d{1,2})/);
+  if(m){
+    const month=+m[1], day=+m[2];
+    if(month<1||month>12||day<1||day>31) return "";
+    let year = today.getFullYear();
+    let candidate = valid(year, month, day);
+    // 반년 이상 지난 날짜면 내년 것으로 본다. 연말·연초에 붙여넣을 때를 위한 처리다.
+    if(candidate && candidate < isoDate(new Date(today.getTime() - 180*DAY))) candidate = valid(year+1, month, day);
+    return candidate;
+  }
+  return "";
+  function valid(y,mo,d){
+    if(mo<1||mo>12||d<1||d>31) return "";
+    const iso=`${y}-${pad2(mo)}-${pad2(d)}`;
+    const check=new Date(`${iso}T00:00`);
+    return Number.isNaN(check.getTime()) ? "" : iso;
+  }
 }
-
-function activeGuests(rootId, date=isoDate(today)){return state.guests.filter(g=>g.rootId===rootId&&!g.removedAt&&g.start<=date&&g.end>=date).length}
-function seatsUsedOn(root, date=isoDate(today)){
-  return state.children.filter(c=>c.rootId===root.id&&isUsableChild(c)).length
-    + activeGuests(root.id, date)
-    + (state.settings.ownerUsesSeat?1:0);
-}
-function freeSeatsOn(root, date=isoDate(today)){return Math.max(0, Number(root.capacity||0) - seatsUsedOn(root, date))}
-function usedSeats(root){return seatsUsedOn(root)}
-function freeSeats(root){return freeSeatsOn(root)}
-
-// ---- 자동 배정 엔진 ---------------------------------------------------------
-// 강의 시간이 겹치면 같은 상시 계정을 두 강의에 쓸 수 없다.
-function coursesOverlap(a, b){
-  const aEnd = String(a.end || a.start), bEnd = String(b.end || b.start);
-  return String(a.start) < bEnd && String(b.start) < aEnd;
-}
-// 기간제 초대는 하루 단위라 좌석 충돌은 날짜 범위로 본다.
-function courseDaysOverlap(a, b){
-  const aS = dateOnly(a.start), aE = dateOnly(a.end) || aS;
-  const bS = dateOnly(b.start), bE = dateOnly(b.end) || bS;
-  return aS <= bE && bS <= aE;
-}
-
-// 단일 워크스페이스로 충당되면 그쪽에 몰아준다. 여러 곳이 가능하면 가장 빠듯한 곳을
-// 골라 큰 워크스페이스를 뒤 강의용으로 남긴다. 아무 곳도 혼자 감당 못 하면 분산한다.
-function pickOrder(pools, need, sizeOf, preferredId){
-  const preferred = pools.find(p=>p.root.id===preferredId);
-  if(preferred && sizeOf(preferred)>=need) return [preferred];
-  const single = pools.filter(p=>sizeOf(p)>=need).sort((a,b)=>sizeOf(a)-sizeOf(b))[0];
-  if(single) return [single];
-  const rest = pools.filter(p=>p!==preferred).sort((a,b)=>sizeOf(b)-sizeOf(a));
-  return preferred ? [preferred, ...rest] : rest;
-}
-
-function planPermanent(course, roots, need, takenAccounts){
-  const day = courseLastDay(course);
-  const blocked = new Set(takenAccounts
-    .filter(t=>t.wholeDay ? courseDaysOverlap(t.course, course) : coursesOverlap(t.course, course))
-    .map(t=>t.childId));
-  const pools = roots
-    .map(root=>({root, accounts: permanentAccounts(root, day).filter(c=>!blocked.has(c.id))}))
-    .filter(p=>p.accounts.length);
-  const groups=[]; let left=need;
-  pickOrder(pools, need, p=>p.accounts.length, course.rootId).forEach(p=>{
-    if(left<=0) return;
-    const take = p.accounts.slice(0, Math.min(left, p.accounts.length));
-    take.forEach(c=>takenAccounts.push({childId:c.id, course}));
-    groups.push({rootId:p.root.id, seats:take.length, accounts:take.map(c=>({id:c.id,name:c.name,email:c.email,owner:!!c.owner}))});
-    left -= take.length;
-  });
-  return {mode:"상시", need, filled:need-left, shortage:left, groups};
-}
-
-function planGuest(course, roots, need, takenSeats, takenAccounts){
-  const from = dateOnly(course.start), to = courseLastDay(course);
-  // 이 강의로 이미 초대된 기간제 멤버는 좌석을 쓰는 동시에 이 강의의 배정분이다.
-  // 남은 인원에서 빼지 않으면 같은 사람을 두 번 세어 좌석이 부족한 것처럼 보인다.
-  const placed = new Map();
-  state.guests.filter(g=>g.courseId===course.id && !g.removedAt)
-    .forEach(g=>placed.set(g.rootId, (placed.get(g.rootId)||0)+1));
-  const placedTotal = [...placed.values()].reduce((a,b)=>a+b, 0);
-
-  const groups = [];
-  const groupFor = rootId => {
-    let g = groups.find(x=>x.rootId===rootId);
-    if(!g){ g = {rootId, seats:0, invited:0}; groups.push(g) }
-    return g;
-  };
-  placed.forEach((count,rootId)=>{const g=groupFor(rootId);g.seats+=count;g.invited+=count});
-
-  const pools = roots.map(root=>{
-    const reserved = takenSeats.filter(t=>t.rootId===root.id && courseDaysOverlap(t.course, course)).reduce((a,t)=>a+t.seats, 0);
-    const plain = Math.max(0, Math.min(freeSeatsOn(root, from), freeSeatsOn(root, to)) - reserved);
-    // 소유자 계정은 좌석 하나를 차지하지만 그 계정 자체를 수강생에게 내줄 수 있다.
-    // 그래서 기간제 배정에서도 한 자리로 친다. 같은 기간 다른 강의가 이미
-    // 그 계정을 가져갔다면 중복이므로 뺀다.
-    const ownerFree = ownerIsMember(root, to)
-      && !takenAccounts.some(t=>t.childId===`owner:${root.id}` && courseDaysOverlap(t.course, course));
-    return {root, plain, ownerFree, free: plain + (ownerFree?1:0)};
-  }).filter(p=>p.free>0);
-
-  let left = Math.max(0, need - placedTotal);
-  pickOrder(pools, left, p=>p.free, course.rootId).forEach(p=>{
-    if(left<=0) return;
-    const seats = Math.min(left, p.free);
-    // 빈 좌석을 다 쓰고 넘어가는 한 자리가 소유자 계정이다.
-    const usesOwner = p.ownerFree && seats > p.plain;
-    const inviteSeats = usesOwner ? seats - 1 : seats;
-    if(inviteSeats > 0) takenSeats.push({rootId:p.root.id, course, seats:inviteSeats});
-    if(usesOwner) takenAccounts.push({childId:`owner:${p.root.id}`, course, wholeDay:true});
-    const g = groupFor(p.root.id);
-    g.seats += seats;
-    if(usesOwner) g.usesOwner = true;
-    left -= seats;
-  });
-  return {mode:"기간제", need, filled:need-left, shortage:left, groups, invited:placedTotal};
-}
-
-// 강의를 시작 순서대로 처리하며 좌석과 계정을 소진시킨다. 먼저 잡힌 강의가 우선권을 갖는다.
-// 강의가 끝나는 날까지 워크스페이스가 살아 있어야 그 강의에 쓸 수 있다.
-function courseLastDay(course){return dateOnly(course.end) || dateOnly(course.start)}
-
-function planAllocations(){
-  const takenSeats = [], takenAccounts = [], result = new Map();
-  state.courses
-    .filter(c=>isPlannedCourse(c) && dateOnly(c.start) >= isoDate(today))
-    .sort((a,b)=>String(a.start).localeCompare(String(b.start)) || String(a.id).localeCompare(String(b.id)))
-    .forEach(course=>{
-      const need = Math.max(0, Number(course.required) || 0);
-      // 강의 날짜 기준으로 아직 만료되지 않은 워크스페이스만 후보가 된다.
-      const roots = state.roots.filter(r=>isRootActiveOn(r, courseLastDay(course)));
-      const plan = course.memberMode==="상시"
-        ? planPermanent(course, roots, need, takenAccounts)
-        : planGuest(course, roots, need, takenSeats, takenAccounts);
-      course.assigned = plan.filled;
-      result.set(course.id, plan);
-    });
-  return result;
-}
-
-function planOf(course){
-  return plans.get(course.id) || {mode:course.memberMode||"기간제", need:Number(course.required)||0, filled:Number(course.assigned)||0, shortage:0, groups:[]};
-}
-function courseLevel(c){const p=plans.get(c.id);if(!p)return "ok";return p.shortage<=0?"ok":p.filled>0?"warn":"danger"}
-// days를 생략하면 기간 제한 없이 다가오는 강의를 전부 돌려준다.
-// 날짜별로 그날 모자란 좌석을 합산한다. 여러 날에 걸친 강의는 그 기간 내내
-// 좌석을 잡으므로 걸쳐 있는 모든 날에 더한다.
-function dailyShortage(days=30){
-  const limit=addDays(days), byDay=new Map();
-  upcomingCourses(days).forEach(c=>{
-    const p=planOf(c); if(p.shortage<=0) return;
-    let d=dateOnly(c.start); const end=dateOnly(c.end)||d;
-    for(let i=0;i<366 && d<=end && d<=limit;i++){
-      byDay.set(d,(byDay.get(d)||0)+p.shortage);
-      d=isoDate(new Date(`${d}T00:00`).getTime()+DAY);
-    }
-  });
-  return byDay;
-}
-
-function upcomingCourses(days){
-  const limit = days==null ? null : addDays(days);
-  return state.courses
-    .filter(c=>isPlannedCourse(c) && dateOnly(c.start) >= isoDate(today) && (!limit || dateOnly(c.start) <= limit))
-    .sort((a,b)=>String(a.start).localeCompare(String(b.start)));
-}
+const looksLikeEmail = v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v??"").trim());
 
 // ---- 저장 ------------------------------------------------------------------
-async function loadRemote(){if(!apiUrl())return renderAll();setSync("loading","데이터 불러오는 중");try{const res=await fetch(`${apiUrl()}?action=all&t=${Date.now()}`);if(!res.ok)throw new Error();const json=await res.json();if(json.ok===false)throw new Error(json.error);state=json.data;normalize();localStorage.setItem("gpt-account-manager-data",JSON.stringify(state));setSync("connected","Google Sheets 연결됨");renderAll()}catch(e){setSync("error","연결 오류 · 로컬 데이터");showToast("Sheets 연결에 실패해 로컬 데이터를 표시합니다.");renderAll()}}
-async function persist(){normalize();renderAll();localStorage.setItem("gpt-account-manager-data",JSON.stringify(state));if(!apiUrl())return;setSync("loading","저장 중");try{const res=await fetch(apiUrl(),{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"saveAll",data:state})});const json=await res.json();if(json.ok===false)throw new Error(json.error);setSync("connected","Google Sheets 연결됨");showToast("Google Sheets에 저장했습니다.")}catch(e){setSync("error","동기화 실패 · 로컬 저장됨");showToast("로컬에는 저장했지만 Sheets 동기화에 실패했습니다.")}}
-// Sheets가 값을 날짜 셀로 바꾸면 "2026-08-11 9:00"이나 "2026-08-11T00:00" 형태로 돌아온다.
-// 이러면 date/datetime-local 입력이 값을 못 읽어 비어 보이고(저장 시 시간 유실),
-// 날짜를 문자열로 비교하는 좌석 계산도 어긋난다. 읽는 즉시 형태를 고정한다.
-const padPart = v => String(v).padStart(2,"0");
-function toDateText(value){
-  const m = String(value ?? "").trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  return m ? `${m[1]}-${padPart(m[2])}-${padPart(m[3])}` : "";
-}
-function toDateTimeText(value){
-  const m = String(value ?? "").trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{1,2}))?/);
-  return m ? `${m[1]}-${padPart(m[2])}-${padPart(m[3])}T${padPart(m[4] ?? 0)}:${padPart(m[5] ?? 0)}` : "";
+function normalize(){
+  state.slots ||= [];
+  // 예전 화면에서 쓰던 시트는 이제 읽지 않지만, 저장할 때 통째로 비우지 않도록 형태만 지킨다.
+  state.roots ||= [];state.children ||= [];state.guests ||= [];state.courses ||= [];
+  state.settings ||= {};
+  state.slots.forEach(s=>{
+    s.id ||= uid('s');
+    s.date = parseDateCell(s.date) || String(s.date ?? "").slice(0,10);
+    ["course","name","account","memo"].forEach(k=>{s[k]=String(s[k] ?? "").trim()});
+  });
+  state.slots = state.slots.filter(s=>s.date && s.account);
 }
 
-function normalize(){
-  state.roots ||= [];state.children ||= [];state.guests ||= [];state.courses ||= [];state.settings ||= {ownerUsesSeat:true};
-  state.roots.forEach(r=>{r.expiry=toDateText(r.expiry)});
-  state.guests.forEach(g=>{g.start=toDateText(g.start);g.end=toDateText(g.end);g.removedAt=toDateText(g.removedAt)});
-  state.courses.forEach(c=>{
-    if(!MEMBER_MODES.includes(c.memberMode))c.memberMode="기간제";
-    c.start=toDateTimeText(c.start);c.end=toDateTimeText(c.end);
-  });
+async function loadRemote(){
+  if(!apiUrl())return renderAll();
+  setSync("loading","데이터 불러오는 중");
+  try{
+    const res=await fetch(`${apiUrl()}?action=all&t=${Date.now()}`);
+    if(!res.ok)throw new Error();
+    const json=await res.json();
+    if(json.ok===false)throw new Error(json.error);
+    state=json.data;normalize();
+    localStorage.setItem("gpt-account-manager-data",JSON.stringify(state));
+    setSync("connected","Google Sheets 연결됨");renderAll();
+  }catch(e){
+    setSync("error","연결 오류 · 로컬 데이터");
+    showToast("Sheets 연결에 실패해 로컬 데이터를 표시합니다.");renderAll();
+  }
+}
+async function persist(){
+  normalize();renderAll();
+  localStorage.setItem("gpt-account-manager-data",JSON.stringify(state));
+  if(!apiUrl())return;
+  setSync("loading","저장 중");
+  try{
+    const res=await fetch(apiUrl(),{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"saveAll",data:state})});
+    const json=await res.json();
+    if(json.ok===false)throw new Error(json.error);
+    setSync("connected","Google Sheets 연결됨");showToast("Google Sheets에 저장했습니다.");
+  }catch(e){
+    setSync("error","동기화 실패 · 로컬 저장됨");showToast("로컬에는 저장했지만 Sheets 동기화에 실패했습니다.");
+  }
 }
 function setSync(type,label){document.querySelector("#syncLabel").textContent=label;document.querySelector("#syncDot").className=`sync-dot ${type==="connected"?"connected":""}`}
 
-// ---- 렌더 ------------------------------------------------------------------
-function renderAll(){normalize();plans=planAllocations();renderDashboard();renderAccounts();renderGuests();renderCalendar();renderSettings()}
+// ---- 조회 ------------------------------------------------------------------
+function searchText(){return document.querySelector("#rosterSearch").value.trim().toLowerCase()}
+function showingPast(){return document.querySelector("#showPast").checked}
+function matches(slot,q){return !q || [slot.course,slot.name,slot.account,slot.memo].join(" ").toLowerCase().includes(q)}
 
-function renderDashboard(){
-  const activeRoots=state.roots.filter(isActiveRoot);
-  const totalCapacity=activeRoots.reduce((a,r)=>a+Number(r.capacity),0), used=activeRoots.reduce((a,r)=>a+usedSeats(r),0);
-  const activeGuestCount=state.guests.filter(g=>guestStatus(g)==="이용 중").length;
-  const horizon=upcomingCourses(30).map(c=>planOf(c));
-  // 좌석은 강의가 끝나면 회수되므로 전 기간 합계가 아니라 "가장 빠듯한 하루"가
-  // 실제로 확보해야 하는 양이다. 같은 날 강의들의 부족분만 합쳐서 그중 최대를 쓴다.
-  const daily=dailyShortage(30);
-  const peakShortage=Math.max(0,...daily.values(),0);
-  const peakDay=[...daily.entries()].find(([,v])=>v===peakShortage&&v>0)?.[0];
-  const shortCourses=horizon.filter(p=>p.shortage>0).length;
-  document.querySelector("#heroShortage").textContent=peakShortage;
-  document.querySelector("#heroNote").textContent=peakDay
-    ?`${fmtDate(peakDay)}에 ${peakShortage}석이 한꺼번에 모자랍니다. 부족한 강의 ${shortCourses}개.`
-    :"향후 30일 강의는 모두 배정 가능합니다.";
-  const cards=[['워크스페이스',activeRoots.length,'운영 중','▦'],['전체 좌석',totalCapacity,`${used}석 사용 중`,'◫'],['여유 좌석',Math.max(0,totalCapacity-used),'오늘 기준','↗'],['이용 중 게스트',activeGuestCount,'기간제 멤버','♙']];
-  document.querySelector("#metrics").innerHTML=cards.map(x=>`<article class="metric"><div class="metric-head"><span>${x[0]}</span><i class="metric-icon">${x[3]}</i></div><strong>${x[1]}</strong><small>${x[2]}</small></article>`).join("");
-  document.querySelector("#capacityList").innerHTML=activeRoots.map(r=>{const u=usedSeats(r),cap=Math.max(1,Number(r.capacity)),pct=Math.min(100,Math.round(u/cap*100));return `<div class="capacity-row"><div class="capacity-name"><b>${escapeHtml(r.name)}</b><small>${escapeHtml(r.email)}</small></div><div class="bar"><i class="${pct>=85?'high':''}" style="width:${pct}%"></i></div><div class="capacity-num"><b>${u}</b> / ${r.capacity}</div></div>`}).join("")||`<div class="empty">등록된 워크스페이스가 없습니다.</div>`;
-
-  const actions=[];
-  state.guests.filter(g=>guestStatus(g)==="제거 필요").forEach(g=>actions.push({danger:true,title:`${g.name} 제거 필요`,sub:`${rootName(g.rootId)} · ${g.end} 종료`}));
-  state.roots.filter(r=>r.status!=="종료"&&r.status!=="보관"&&r.expiry&&daysToExpiry(r)<=30).forEach(r=>{
-    const left=daysToExpiry(r);
-    actions.push(left<0
-      ? {danger:true,title:`${r.name} 만료됨`,sub:`${r.expiry} · ${-left}일 지남 · 배정에서 제외 중`}
-      : {danger:false,title:`${r.name} 만료 임박`,sub:`${r.expiry} · ${left}일 남음`});
+// 날짜별로 묶어 돌려준다. 지난 날짜는 기본으로 감춘다.
+function groupedDates({includePast=showingPast(), query=searchText()}={}){
+  const map=new Map();
+  state.slots.forEach(s=>{
+    if(!includePast && s.date < TODAY) return;
+    if(!matches(s,query)) return;
+    (map.get(s.date) || map.set(s.date,[]).get(s.date)).push(s);
   });
-  upcomingCourses(30).forEach(c=>{const p=planOf(c);if(p.shortage>0)actions.push({danger:true,title:`${c.title} ${p.shortage}${p.mode==="상시"?"개 계정":"석"} 부족`,sub:`${fmtDateTime(c.start)} · ${p.mode} 배정`})});
-  document.querySelector("#actionCount").textContent=actions.length;
-  document.querySelector("#actionList").innerHTML=actions.slice(0,6).map(a=>`<div class="action-item ${a.danger?'danger':''}"><i></i><div><b>${escapeHtml(a.title)}</b><small>${escapeHtml(a.sub)}</small></div></div>`).join("")||`<div class="empty">지금 처리할 일이 없습니다.</div>`;
+  return [...map.entries()].sort(([a],[b])=>a.localeCompare(b))
+    .map(([date,rows])=>({date, rows:rows.slice().sort((x,y)=>
+      (x.course||"").localeCompare(y.course||"") || (x.name||"").localeCompare(y.name||"") || x.account.localeCompare(y.account))}));
+}
+const pastCount = () => state.slots.filter(s=>s.date < TODAY).length;
 
-  renderAllocations();
+// ---- 렌더 ------------------------------------------------------------------
+function renderAll(){normalize();pruneSelection();renderHero();renderRoster();renderSettings()}
+
+function renderHero(){
+  const upcoming=groupedDates({includePast:false, query:""});
+  const totalAccounts=upcoming.reduce((a,g)=>a+g.rows.length,0);
+  const uniqueAccounts=new Set(upcoming.flatMap(g=>g.rows.map(r=>r.account.toLowerCase()))).size;
+  const busiest=upcoming.slice().sort((a,b)=>b.rows.length-a.rows.length)[0];
+  document.querySelector("#heroDays").textContent=upcoming.length;
+  document.querySelector("#heroNote").textContent=upcoming.length
+    ? `가장 가까운 일정은 ${fmtDay(upcoming[0].date)} · ${upcoming[0].rows.length}개 계정입니다.`
+    : "등록된 다가오는 일정이 없습니다. 엑셀에서 붙여넣어 시작하세요.";
+  const cards=[
+    ['다가오는 일정', upcoming.length, '일', '▤'],
+    ['총 계정', totalAccounts, `중복 제외 ${uniqueAccounts}개`, '◫'],
+    ['가장 많은 날', busiest?busiest.rows.length:0, busiest?fmtDay(busiest.date):'없음', '↗'],
+    ['지난 일정', pastCount(), '자동으로 숨김', '⏱']
+  ];
+  document.querySelector("#metrics").innerHTML=cards.map(x=>
+    `<article class="metric"><div class="metric-head"><span>${x[0]}</span><i class="metric-icon">${x[3]}</i></div><strong>${x[1]}</strong><small>${escapeHtml(x[2])}</small></article>`).join("");
 }
 
-const ALLOCATION_PREVIEW = 5;
-function renderAllocations(){
-  const all=upcomingCourses(), list=all.slice(0,ALLOCATION_PREVIEW), rest=all.length-list.length;
-  document.querySelector("#allocationMore").textContent=rest>0?`이 외 ${rest}개 강의는 캘린더에서 확인하세요.`:"";
-  document.querySelector("#allocationList").innerHTML=list.map(c=>{
-    const p=planOf(c), permanent=p.mode==="상시", unit=permanent?"개":"석";
-    const registered=state.guests.filter(g=>g.courseId===c.id&&!g.removedAt).length;
-    const targets=p.groups.length?p.groups.map(g=>{
-      // 소유자 계정 자리는 초대가 아니라 계정을 내주는 것이라 따로 안내한다.
-      const ownerSlot=g.usesOwner?1:0;
-      const toInvite=g.seats-(g.invited||0)-ownerSlot, notes=[];
-      if(g.invited)notes.push(`이미 ${g.invited}명 초대됨`);
-      if(toInvite>0)notes.push(`${toInvite}명 더 초대하세요`);
-      if(ownerSlot)notes.push(`소유자 계정 1개 사용`);
-      const accounts=g.accounts?.length
-        ? `<div class="account-chips">${g.accounts.map(a=>`<code class="${a.owner?"owner":""}" title="${escapeHtml(a.name)}">${escapeHtml(a.email)}${a.owner?" · 소유자":""}</code>`).join("")}</div>`
-        : `<div class="alloc-hint ${toInvite>0?"":"done"}">${escapeHtml(notes.join(" · ")||"초대 인원이 없습니다.")}</div>`;
-      return `<div class="alloc-target"><div class="alloc-target-head"><b>${escapeHtml(rootName(g.rootId))}</b><span class="seat-count">${g.seats}${unit}</span></div>${accounts}</div>`;
-    }).join(""):`<div class="alloc-target empty-target">배정 가능한 ${permanent?"상시 계정":"좌석"}이 없습니다.</div>`;
-    const badge=p.shortage>0
-      ? `<span class="status danger">${p.shortage}${unit} 부족</span>`
-      : `<span class="status">배정 완료</span>`;
-    const progress=permanent?"":`<small class="alloc-progress">실제 초대 등록 ${registered} / ${p.need}명</small>`;
-    return `<article class="alloc-item ${p.shortage>0?'short':''}">
-      <div class="alloc-when"><b>${fmtDate(c.start)}</b><small>${String(c.start).slice(11,16)}</small></div>
-      <div class="alloc-main">
-        <div class="alloc-title"><b>${escapeHtml(c.title)}</b><span class="mode-tag ${permanent?'permanent':'guest'}">${p.mode} 멤버</span></div>
-        <small>${escapeHtml(c.manager||"담당자 미정")} · ${p.need}${unit} 필요 · ${p.filled}${unit} 배정</small>
-        ${progress}
+function renderRoster(){
+  const groups=groupedDates();
+  const past=pastCount();
+  document.querySelector("#showPastLabel").textContent = past ? `지난 날짜 보기 (${past})` : "지난 날짜 보기";
+  document.querySelector("#dateList").innerHTML = groups.length ? groups.map(g=>{
+    const isPast=g.date<TODAY;
+    return `<article class="card date-card ${isPast?'past':''}">
+      <div class="date-head">
+        <div class="date-title">
+          <p class="eyebrow">${escapeHtml(dLabel(g.date))}</p>
+          <h3>${escapeHtml(fmtDay(g.date))}</h3>
+        </div>
+        <span class="count-badge">${g.rows.length}</span>
+        <div class="date-actions">
+          <button class="mini-button" data-copy-date="${g.date}">복사</button>
+          <button class="mini-button" data-add-date="${g.date}">+ 추가</button>
+          <button class="mini-button" data-clear-date="${g.date}">비우기</button>
+        </div>
       </div>
-      <div class="alloc-targets">${targets}</div>
-      <div class="alloc-side">${badge}<button class="mini-button" data-edit-course="${c.id}">수정</button></div>
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th class="check-col"><input type="checkbox" data-check-date="${g.date}" aria-label="${escapeHtml(fmtDay(g.date))} 전체 선택"></th>
+          <th class="no-col">No</th><th>과정명</th><th>이름</th><th>계정</th><th>메모</th><th></th>
+        </tr></thead>
+        <tbody>${g.rows.map((s,i)=>`<tr>
+          <td class="check-col"><input type="checkbox" data-slot="${s.id}" ${selected.has(s.id)?'checked':''} aria-label="${escapeHtml(s.account)} 선택"></td>
+          <td class="no-col">${i+1}</td>
+          <td>${escapeHtml(s.course||'-')}</td>
+          <td>${escapeHtml(s.name||'-')}</td>
+          <td><code class="account">${escapeHtml(s.account)}</code></td>
+          <td class="memo-cell">${escapeHtml(s.memo||'')}</td>
+          <td><div class="row-actions"><button class="mini-button" data-edit-slot="${s.id}">수정</button></div></td>
+        </tr>`).join("")}</tbody>
+      </table></div>
     </article>`;
-  }).join("")||`<div class="empty">예정된 강의가 없습니다.</div>`;
-}
-
-function renderAccounts(){
-  const q=document.querySelector("#accountSearch").value.toLowerCase(),f=document.querySelector("#accountFilter").value;
-  const rows=state.roots.filter(r=>(f==="all"||r.status===f)&&[r.name,r.email,...state.children.filter(c=>c.rootId===r.id).flatMap(c=>[c.name,c.email])].join(' ').toLowerCase().includes(q));
-  document.querySelector("#workspaceGrid").innerHTML=rows.map(r=>{
-    const children=state.children.filter(c=>c.rootId===r.id&&c.status!=="보관");
-    // 소유자 계정은 워크스페이스 수정 화면에서 다루므로 목록에서는 읽기 전용으로 보여준다.
-    const ownerRow=ownerIsMember(r)?`<div class="member"><span class="avatar">◆</span><div><b>${escapeHtml(r.name)} 소유자</b><small>${escapeHtml(r.email)}</small></div><span class="status neutral">소유자</span></div>`:'';
-    const memberRows=ownerRow+children.map(c=>`<div class="member"><span class="avatar">${escapeHtml(c.name.slice(-2))}</span><div><b>${escapeHtml(c.name)}</b><small>${escapeHtml(c.email)}</small></div><span class="status ${statusClass(c.status)}">${c.status}</span><button class="mini-button" data-edit-child="${c.id}">수정</button></div>`).join('');
-    const expired=isRootExpired(r);
-    const badge=expired?`<span class="status danger" title="만료일 ${escapeHtml(r.expiry)}">만료됨</span>`:`<span class="status ${statusClass(r.status)}">${r.status}</span>`;
-    return `<article class="workspace-card ${r.status==='종료'||expired?'archived':''}"><div class="workspace-head"><div class="workspace-symbol">${escapeHtml(r.name.slice(0,1))}</div><div><h3>${escapeHtml(r.name)}</h3><p>${escapeHtml(r.email)}</p>${expired?`<p class="expired-note">${escapeHtml(r.expiry)} 만료 · 배정에서 제외됩니다</p>`:''}</div>${badge}</div><div class="workspace-stats"><div><small>총 좌석</small><b>${r.capacity}</b></div><div><small>사용</small><b>${usedSeats(r)}</b></div><div><small>여유</small><b>${freeSeats(r)}</b></div></div><div class="member-list">${memberRows||'<div class="empty">상시 멤버가 없습니다.</div>'}</div><div class="workspace-actions"><button class="mini-button" data-add-child="${r.id}">+ 상시 멤버</button><button class="mini-button" data-edit-root="${r.id}">워크스페이스 수정</button></div></article>`;
-  }).join('')||'<div class="empty">검색 결과가 없습니다.</div>';
-}
-
-// 선택은 화면에 보이는 행에만 적용한다. 검색·필터를 바꾸면 비워서
-// "선택된 것"과 "보이는 것"이 어긋나지 않게 한다.
-let selectedGuests = new Set();
-function renderGuests(){
-  const q=document.querySelector("#guestSearch").value.toLowerCase(),f=document.querySelector("#guestFilter").value;
-  const rows=state.guests.filter(g=>(f==='all'||guestStatus(g)===f)&&[g.name,g.email,g.organization].join(' ').toLowerCase().includes(q));
-  document.querySelector("#guestTable").innerHTML=rows.map(g=>`<tr><td class="check-col"><input type="checkbox" data-guest="${g.id}" ${selectedGuests.has(g.id)?'checked':''} aria-label="${escapeHtml(g.name)} 선택"></td><td><b>${escapeHtml(g.name)}</b><small>${escapeHtml(g.email)}</small></td><td>${escapeHtml(g.organization||'-')}</td><td>${escapeHtml(rootName(g.rootId))}<small>${escapeHtml(courseTitle(g.courseId)||'강의 미지정')}</small></td><td>${g.start} → ${g.end}</td><td><span class="status ${statusClass(guestStatus(g))}">${guestStatus(g)}</span></td><td><div class="row-actions">${guestStatus(g)==='제거 필요'?`<button class="mini-button" data-remove-guest="${g.id}">제거 완료</button>`:''}<button class="mini-button" data-edit-guest="${g.id}">수정</button></div></td></tr>`).join('')||'<tr><td colspan="7" class="empty">등록된 기간제 멤버가 없습니다.</td></tr>';
-  syncGuestSelection();
-}
-function syncGuestSelection(){
-  const boxes=[...document.querySelectorAll('#guestTable input[data-guest]')];
-  const checked=boxes.filter(b=>b.checked).length;
-  const all=document.querySelector('#guestSelectAll');
-  all.checked=boxes.length>0&&checked===boxes.length;
-  all.indeterminate=checked>0&&checked<boxes.length;
-  const btn=document.querySelector('#deleteSelectedGuests');
-  btn.hidden=checked===0;
-  btn.textContent=`선택 ${checked}명 삭제`;
-}
-function deleteSelectedGuests(){
-  const targets=state.guests.filter(g=>selectedGuests.has(g.id));
-  if(!targets.length)return;
-  const names=targets.map(g=>g.name);
-  const preview=names.slice(0,5).join(', ')+(names.length>5?` 외 ${names.length-5}명`:'');
-  if(!confirm(`기간제 멤버 ${targets.length}명을 삭제합니다.\n${preview}\n\n실제 워크스페이스에서 제거했는지 먼저 확인하세요.`))return;
-  state.guests=state.guests.filter(g=>!selectedGuests.has(g.id));
-  selectedGuests.clear();
-  persist();
-  showToast(`기간제 멤버 ${targets.length}명을 삭제했습니다.`);
-}
-
-function renderCalendar(){
-  const y=calendarDate.getFullYear(),m=calendarDate.getMonth();
-  document.querySelector("#monthLabel").textContent=`${y}년 ${m+1}월`;
-  const first=new Date(y,m,1),startDay=1-first.getDay();
-  let html='';
-  for(let i=0;i<42;i++){
-    const d=new Date(y,m,startDay+i),key=isoDate(d),events=state.courses.filter(c=>dateOnly(c.start)===key);
-    html+=`<div class="day ${d.getMonth()!==m?'muted':''} ${key===isoDate(today)?'today':''}"><span class="day-number">${d.getDate()}</span>${events.map(c=>`<button class="course-chip ${courseLevel(c)}" data-edit-course="${c.id}" title="${escapeHtml(c.title)} · ${c.memberMode} 멤버"><b>${escapeHtml(c.title)}</b>${String(c.start).slice(11,16)} · ${c.memberMode[0]} ${planOf(c).filled}/${c.required}</button>`).join('')}</div>`;
-  }
-  document.querySelector("#calendar").innerHTML=html;
+  }).join("") : `<div class="card"><div class="empty">${searchText()?"검색 결과가 없습니다.":"등록된 일정이 없습니다. 오른쪽 위 <b>엑셀 붙여넣기</b>로 시작하세요."}</div></div>`;
+  syncSelectionUi();
 }
 
 function renderSettings(){
   document.querySelector("#apiUrlInput").value=apiUrl();
-  document.querySelector("#ownerSeatToggle").checked=!!state.settings.ownerUsesSeat;
   const hints={
     default:"config.js에 설정된 기본 주소로 연결합니다. 다른 주소를 쓰려면 위 칸에 입력하고 저장하세요.",
     custom:"이 브라우저에 저장된 주소를 사용합니다. 칸을 비우고 저장하면 기본 주소로 돌아갑니다.",
     off:"이 브라우저에서는 연결하지 않습니다. 칸을 비운 채 '연결 저장'을 누르면 기본 주소로 돌아갑니다.",
-    none:"연결된 주소가 없어 예시 또는 브라우저 저장 데이터를 사용 중입니다."
+    none:"연결된 주소가 없어 이 브라우저에 저장된 데이터만 사용합니다."
   };
   document.querySelector("#connectionHint").textContent=hints[apiSource()];
 }
 
-// ---- CSV 일괄 등록 ----------------------------------------------------------
-// 한국어 Windows의 Excel은 "CSV UTF-8"이 아닌 그냥 "CSV"로 저장하면 CP949로 기록한다.
-// UTF-8로 먼저 엄격하게 해석하고, 실패하면 CP949로 다시 읽는다. 조용히 깨진 글자가
-// 등록되는 것을 막기 위해 fatal 옵션이 반드시 필요하다.
-async function readCsvText(file){
-  const buffer = await file.arrayBuffer();
-  try{ return new TextDecoder("utf-8",{fatal:true}).decode(buffer) }
-  catch{ return new TextDecoder("euc-kr").decode(buffer) }
-}
-
-function parseCsv(text){
-  const rows=[];let row=[],cell='',quoted=false;
-  text=String(text).replace(/^﻿/,'');
-  for(let i=0;i<text.length;i++){
-    const char=text[i],next=text[i+1];
-    if(char==='"'&&quoted&&next==='"'){cell+='"';i++;continue}
-    if(char==='"'){quoted=!quoted;continue}
-    if(char===','&&!quoted){row.push(cell.trim());cell='';continue}
-    if((char==='\n'||char==='\r')&&!quoted){if(char==='\r'&&next==='\n')i++;row.push(cell.trim());if(row.some(Boolean))rows.push(row);row=[];cell='';continue}
-    cell+=char;
-  }
-  row.push(cell.trim());if(row.some(Boolean))rows.push(row);
-  if(!rows.length)return [];
-  const headers=rows[0].map(h=>h.trim().toLowerCase());
-  return rows.slice(1).map((values,index)=>({line:index+2,...Object.fromEntries(headers.map((h,i)=>[h,values[i]??'']))}));
-}
-
-function normalizeMemberType(value){const v=String(value).trim().toLowerCase();if(['상시','상시 멤버','child','permanent'].includes(v))return 'child';if(['기간제','기간제 멤버','guest','temporary'].includes(v))return 'guest';return ''}
-function validEmail(value){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)}
-// CSV의 course 열은 강의명으로도, 강의 id로도 지정할 수 있다.
-function findCourseRef(value){
-  const v = String(value ?? "").trim();
-  if(!v) return {id:""};
-  const pool = state.courses.filter(c=>c.status!=="취소");
-  const byId = pool.find(c=>c.id===v);
-  if(byId) return {id:byId.id};
-  const byTitle = pool.filter(c=>String(c.title).trim().toLowerCase()===v.toLowerCase());
-  if(byTitle.length===1) return {id:byTitle[0].id};
-  if(byTitle.length>1) return {error:"같은 이름의 강의가 여러 개입니다. course 열에 강의 id를 넣어 주세요."};
-  return {error:"course 열의 강의를 찾을 수 없습니다."};
-}
-function validDate(value){return /^\d{4}-\d{2}-\d{2}$/.test(value)&&!Number.isNaN(new Date(`${value}T00:00:00`).getTime())}
-function importMembers(rows){
-  const errors=[],children=[],guests=[];
-  // 상시 계정은 워크스페이스마다 따로 존재하므로 중복 검사도 워크스페이스 단위로 한다.
-  const seenChildren=new Set(state.children.filter(c=>c.status!=='보관').map(c=>`${c.email.toLowerCase()}|${c.rootId}`));
-  const seenGuests=new Set(state.guests.filter(g=>!g.removedAt).map(g=>`${g.email.toLowerCase()}|${g.rootId}|${g.start}|${g.end}`));
-  rows.forEach(row=>{
-    const type=normalizeMemberType(row.member_type),email=String(row.email||'').trim().toLowerCase(),workspaceEmail=String(row.workspace_email||'').trim().toLowerCase();
-    const root=state.roots.find(r=>r.email.toLowerCase()===workspaceEmail&&r.status!=='종료'&&r.status!=='보관');
-    if(!type)return errors.push(`${row.line}행: member_type은 상시 또는 기간제여야 합니다.`);
-    if(!validEmail(email))return errors.push(`${row.line}행: 이메일 형식을 확인해 주세요.`);
-    if(!root)return errors.push(`${row.line}행: 운영 중인 워크스페이스 소유자 이메일을 찾을 수 없습니다.`);
-    const name=String(row.name||'').trim()||email.split('@')[0];
-    if(type==='child'){
-      const key=`${email}|${root.id}`;
-      if(seenChildren.has(key))return errors.push(`${row.line}행: 이 워크스페이스에 이미 등록된 상시 멤버입니다.`);
-      const status=String(row.status||'').trim()||'사용 가능';
-      if(!CHILD_STATUS.includes(status))return errors.push(`${row.line}행: 상시 멤버 상태값이 올바르지 않습니다.`);
-      seenChildren.add(key);children.push({id:uid('c'),rootId:root.id,name,email,status,memo:String(row.memo||'').trim()});
-      return;
-    }
-    const courseRef=findCourseRef(row.course);
-    if(courseRef.error)return errors.push(`${row.line}행: ${courseRef.error}`);
-    const linked=courseRef.id?state.courses.find(c=>c.id===courseRef.id):null;
-    // 강의를 지정하고 기간을 비워 두면 그 강의 일정을 초대 기간으로 쓴다.
-    let start=String(row.start||'').trim(),end=String(row.end||'').trim();
-    if(linked&&!start&&!end){start=dateOnly(linked.start);end=dateOnly(linked.end)||start}
-    if(!validDate(start)||!validDate(end))return errors.push(`${row.line}행: 기간제 멤버의 start와 end를 YYYY-MM-DD로 입력하거나, course 열로 강의를 지정해 주세요.`);
-    if(end<start)return errors.push(`${row.line}행: 종료일은 시작일보다 빠를 수 없습니다.`);
-    const guestKey=`${email}|${root.id}|${start}|${end}`;
-    if(seenGuests.has(guestKey))return errors.push(`${row.line}행: 같은 기간에 등록된 기간제 멤버입니다.`);
-    seenGuests.add(guestKey);guests.push({id:uid('g'),name,email,organization:String(row.organization||'').trim(),rootId:root.id,courseId:courseRef.id,start,end,removedAt:'',memo:String(row.memo||'').trim()});
+// ---- 선택 ------------------------------------------------------------------
+function pruneSelection(){const ids=new Set(state.slots.map(s=>s.id));[...selected].forEach(id=>{if(!ids.has(id))selected.delete(id)})}
+function syncSelectionUi(){
+  const boxes=[...document.querySelectorAll('#dateList input[data-slot]')];
+  const checked=boxes.filter(b=>b.checked).length;
+  document.querySelectorAll('#dateList input[data-check-date]').forEach(head=>{
+    const rows=[...document.querySelectorAll(`#dateList input[data-slot]`)].filter(b=>b.closest('.date-card')===head.closest('.date-card'));
+    const on=rows.filter(b=>b.checked).length;
+    head.checked=rows.length>0&&on===rows.length;
+    head.indeterminate=on>0&&on<rows.length;
   });
-  return {errors,children,guests};
+  const btn=document.querySelector('#deleteSelected');
+  btn.hidden=checked===0;
+  btn.textContent=`선택 ${checked}개 삭제`;
 }
 
-// ---- 편집 다이얼로그 --------------------------------------------------------
-const field=(name,label,type='text',value='',extra='',full=false)=>`<label class="${full?'full':''}">${label}<${type==='textarea'?'textarea':'input'} name="${name}" ${type!=='textarea'?`type="${type}"`:''} value="${type==='textarea'?'':escapeHtml(value)}" ${extra}>${type==='textarea'?escapeHtml(value):''}</${type==='textarea'?'textarea':'input'}></label>`;
-const selectField=(name,label,options,value,full=false)=>`<label class="${full?'full':''}">${label}<select name="${name}">${options.map(o=>`<option ${o===value?'selected':''}>${o}</option>`).join('')}</select></label>`;
-const rootSelect=(value,label='소속 워크스페이스',allowEmpty=false)=>`<label>${label}<select name="rootId" ${allowEmpty?'':'required'}>${allowEmpty?`<option value="">자동 배정에 맡김</option>`:''}${state.roots.filter(r=>r.status!=="종료").map(r=>`<option value="${r.id}" ${r.id===value?'selected':''}>${escapeHtml(r.name)}${isRootExpired(r)?' (만료됨)':''}</option>`).join('')}</select></label>`;
-const courseSelect=(value)=>`<label>연결 강의<select name="courseId"><option value="">지정 안 함</option>${state.courses.filter(c=>c.status!=='취소').sort((a,b)=>String(b.start).localeCompare(String(a.start))).map(c=>`<option value="${c.id}" ${c.id===value?'selected':''}>${escapeHtml(c.title)} · ${dateOnly(c.start)}</option>`).join('')}</select></label>`;
+// ---- 엑셀 붙여넣기 ----------------------------------------------------------
+const LABEL = {
+  course: /과정|과목|교육|기업|고객/,
+  name: /이름|성명|성함|담당/,
+  account: /계정|이메일|메일|아이디|id/i,
+  memo: /메모|비고|참고/
+};
 
-function openEditor(type,id=null,parentId=null){
-  editing={type,id,parentId};
-  let item,title,fields;
-  if(type==='root'){
-    item=state.roots.find(x=>x.id===id)||{};
-    title=id?'워크스페이스 수정':'워크스페이스 추가';
-    fields=field('name','워크스페이스명','text',item.name,'required')+field('email','소유자 이메일','email',item.email,'required')+field('billingDay','결제 기준일','number',item.billingDay||1,'min="1" max="31" required')+field('expiry','만료일','date',item.expiry||isoDate(today),'required')+field('capacity','총 좌석 수','number',item.capacity||10,'min="1" required')+selectField('status','상태',ROOT_STATUS,item.status||'운영 중')+field('memo','메모','textarea',item.memo,'',true);
-  }else if(type==='child'){
-    item=state.children.find(x=>x.id===id)||{};
-    title=id?'상시 멤버 수정':'상시 멤버 추가';
-    fields=rootSelect(item.rootId||parentId)+field('name','멤버명','text',item.name,'required')+field('email','이메일','email',item.email,'required')+selectField('status','상태',CHILD_STATUS,item.status||'사용 가능')+field('memo','메모','textarea',item.memo,'',true);
-  }else if(type==='guest'){
-    item=state.guests.find(x=>x.id===id)||{};
-    title=id?'기간제 멤버 수정':'기간제 멤버 추가';
-    fields=field('name','이름','text',item.name,'required')+field('email','이메일','email',item.email,'required')+field('organization','소속','text',item.organization)+rootSelect(item.rootId)+courseSelect(item.courseId)+field('start','초대 시작일','date',item.start||isoDate(today),'required')+field('end','초대 종료일','date',item.end||addDays(1),'required')+field('memo','메모','textarea',item.memo,'',true);
-  }else{
-    item=state.courses.find(x=>x.id===id)||{};
-    title=id?'강의 일정 수정':'강의 일정 추가';
-    fields=field('title','강의명','text',item.title,'required')
-      +selectField('memberMode','사용할 멤버 종류',MEMBER_MODES,item.memberMode||'기간제')
-      +field('start','시작 일시','datetime-local',item.start||`${addDays(1)}T10:00`,'required')
-      +field('end','종료 일시','datetime-local',item.end||`${addDays(1)}T17:00`,'required')
-      +field('required','필요 좌석','number',item.required??10,'min="1" required')
-      +field('manager','담당자','text',item.manager)
-      +rootSelect(item.rootId,'우선 배정 워크스페이스 (선택)',true)
-      +selectField('status','상태',COURSE_STATUS,item.status||'예정')
-      +field('memo','메모','textarea',item.memo,'',true);
+// 머리글에 날짜가 있는 표. 날짜 열에는 계정이 들어 있고, 그 앞의 열들이 과정명·이름이다.
+function parseByDateHeader(rows){
+  let headerIdx=-1, dateCols=[];
+  for(let i=0;i<Math.min(rows.length,10);i++){
+    const found=rows[i].map((cell,idx)=>({idx,date:parseDateCell(cell)})).filter(x=>x.date);
+    if(found.length){headerIdx=i;dateCols=found;break}
   }
-  document.querySelector("#dialogTitle").textContent=title;
-  document.querySelector("#dialogEyebrow").textContent=id?'EDIT RECORD':'NEW RECORD';
-  document.querySelector("#formFields").innerHTML=fields;
+  if(headerIdx<0) return null;
+  const header=rows[headerIdx].map(c=>String(c??"").trim());
+  const groups=dateCols.map((col,i)=>{
+    const from = i===0 ? 0 : dateCols[i-1].idx+1;
+    const attrs={};
+    for(let c=from;c<col.idx;c++){
+      const label=header[c]||"";
+      if(attrs.course===undefined && LABEL.course.test(label)) attrs.course=c;
+      else if(attrs.name===undefined && LABEL.name.test(label)) attrs.name=c;
+      else if(attrs.memo===undefined && LABEL.memo.test(label)) attrs.memo=c;
+    }
+    return {date:col.date, col:col.idx, attrs};
+  });
+  const slots=[];
+  rows.slice(headerIdx+1).forEach(row=>{
+    groups.forEach(g=>{
+      const account=String(row[g.col]??"").trim();
+      if(!account) return;
+      slots.push({id:uid('s'),date:g.date,
+        course:String(row[g.attrs.course]??"").trim(),
+        name:String(row[g.attrs.name]??"").trim(),
+        account,
+        memo:String(row[g.attrs.memo]??"").trim()});
+    });
+  });
+  return slots;
+}
+
+// 날짜 머리글이 없는 표. 화면에서 고른 날짜를 쓰고, 열은 머리글 이름이나 형태로 짐작한다.
+function parseSingleDate(rows, date){
+  if(!date) return null;
+  const header=rows[0]?.map(c=>String(c??"").trim()) || [];
+  const mapped={};
+  header.forEach((label,idx)=>{
+    Object.entries(LABEL).forEach(([key,re])=>{if(mapped[key]===undefined && re.test(label)) mapped[key]=idx});
+  });
+  const hasHeader=mapped.account!==undefined || (mapped.course!==undefined && mapped.name!==undefined);
+  const body=hasHeader?rows.slice(1):rows;
+  const slots=[];
+  body.forEach(row=>{
+    let account = mapped.account!==undefined ? String(row[mapped.account]??"").trim() : "";
+    if(!account){const hit=row.find(looksLikeEmail);account=hit?String(hit).trim():""}
+    if(!account) return;
+    let course = mapped.course!==undefined ? String(row[mapped.course]??"").trim() : "";
+    let name = mapped.name!==undefined ? String(row[mapped.name]??"").trim() : "";
+    if(!course || !name){
+      // 머리글이 없으면 숫자와 계정을 뺀 나머지 칸을 순서대로 과정명·이름으로 본다.
+      const rest=row.map(c=>String(c??"").trim()).filter(c=>c && c!==account && !/^\d+$/.test(c));
+      course=course||rest[0]||"";
+      name=name||rest[1]||"";
+    }
+    slots.push({id:uid('s'),date,course,name,account,
+      memo: mapped.memo!==undefined ? String(row[mapped.memo]??"").trim() : ""});
+  });
+  return slots;
+}
+
+function parsePasted(text, fallbackDate){
+  const rows=String(text||"").replace(/\r\n?/g,"\n").split("\n").map(line=>line.split("\t"));
+  while(rows.length && rows[rows.length-1].every(c=>!String(c??"").trim())) rows.pop();
+  if(!rows.length) return {slots:[],error:"붙여넣은 내용이 없습니다."};
+  const byHeader=parseByDateHeader(rows);
+  if(byHeader) return byHeader.length ? {slots:byHeader} : {slots:[],error:"날짜 머리글은 찾았지만 계정이 들어 있는 행이 없습니다."};
+  const single=parseSingleDate(rows, fallbackDate);
+  if(single===null) return {slots:[],error:"머리글에서 날짜를 찾지 못했습니다. 위에서 날짜를 골라 주세요."};
+  return single.length ? {slots:single} : {slots:[],error:"계정이 들어 있는 행을 찾지 못했습니다."};
+}
+
+function previewPaste(){
+  const box=document.querySelector("#pasteResult");
+  const text=document.querySelector("#pasteInput").value;
+  if(!text.trim()){box.className="import-result";box.textContent="";return null}
+  const {slots,error}=parsePasted(text, document.querySelector("#pasteDate").value);
+  if(error){box.className="import-result show";box.textContent=error;return null}
+  const dates=[...new Set(slots.map(s=>s.date))].sort();
+  const sample=slots.slice(0,3).map(s=>`${s.date} · ${s.course||'-'} · ${s.name||'-'} · ${s.account}`).join("\n");
+  box.className="import-result show success";
+  box.textContent=`${dates.length}개 날짜, 계정 ${slots.length}개를 찾았습니다.\n${dates.map(d=>`${d} (${slots.filter(s=>s.date===d).length})`).join(", ")}\n\n${sample}${slots.length>3?`\n… 외 ${slots.length-3}개`:""}`;
+  return slots;
+}
+
+// ---- 편집 ------------------------------------------------------------------
+const field=(name,label,type,value,extra="")=>`<label>${label}<input name="${name}" type="${type}" value="${escapeHtml(value)}" ${extra}></label>`;
+function openEditor(id=null, date=""){
+  editing=id;
+  const item=state.slots.find(s=>s.id===id) || {};
+  document.querySelector("#dialogTitle").textContent=id?"계정 수정":"계정 추가";
+  document.querySelector("#dialogEyebrow").textContent=id?"EDIT RECORD":"NEW RECORD";
+  document.querySelector("#formFields").innerHTML=
+    field("date","날짜","date",item.date||date||TODAY,"required")
+    +field("account","계정","text",item.account,"required placeholder=\"name@example.com\"")
+    +field("course","과정명","text",item.course)
+    +field("name","이름","text",item.name)
+    +`<label class="full">메모<input name="memo" type="text" value="${escapeHtml(item.memo||"")}"></label>`;
   document.querySelector("#deleteRecord").hidden=!id;
   document.querySelector("#editorDialog").showModal();
 }
-
 function saveEditor(form){
   const v=Object.fromEntries(new FormData(form));
-  const replace=(list,item)=>{const found=list.find(x=>x.id===editing.id);found?Object.assign(found,item):list.push(item)};
-  if(editing.type==='root'){
-    replace(state.roots,{id:editing.id||uid('r'),name:v.name,email:v.email,billingDay:Number(v.billingDay),expiry:v.expiry,capacity:Number(v.capacity),status:v.status,memo:v.memo});
-  }else if(editing.type==='child'){
-    replace(state.children,{id:editing.id||uid('c'),rootId:v.rootId,name:v.name,email:v.email,status:v.status,memo:v.memo});
-  }else if(editing.type==='guest'){
-    if(v.end<v.start){showToast('종료일은 시작일보다 빠를 수 없습니다.');return false}
-    replace(state.guests,{id:editing.id||uid('g'),name:v.name,email:v.email,organization:v.organization,rootId:v.rootId,courseId:v.courseId||'',start:v.start,end:v.end,removedAt:editing.id?(state.guests.find(x=>x.id===editing.id)?.removedAt||''):'',memo:v.memo});
-  }else{
-    if(v.end<v.start){showToast('종료 일시는 시작 일시보다 빠를 수 없습니다.');return false}
-    replace(state.courses,{id:editing.id||uid('co'),title:v.title,rootId:v.rootId||'',start:v.start,end:v.end,required:Number(v.required),assigned:0,memberMode:v.memberMode,manager:v.manager,status:v.status,memo:v.memo});
-  }
+  const date=parseDateCell(v.date);
+  if(!date){showToast("날짜를 확인해 주세요.");return false}
+  if(!String(v.account).trim()){showToast("계정을 입력해 주세요.");return false}
+  const item={id:editing||uid('s'),date,account:String(v.account).trim(),course:String(v.course).trim(),name:String(v.name).trim(),memo:String(v.memo).trim()};
+  const found=state.slots.find(s=>s.id===editing);
+  found?Object.assign(found,item):state.slots.push(item);
   persist();return true;
 }
-
 function deleteRecord(){
-  if(!editing?.id)return false;
-  const {type,id}=editing;
-  if(type==='root'){
-    const root=state.roots.find(x=>x.id===id);
-    const kids=state.children.filter(c=>c.rootId===id).length,gs=state.guests.filter(g=>g.rootId===id).length;
-    if(!confirm(`'${root?.name}' 워크스페이스를 삭제합니다.\n상시 멤버 ${kids}명, 기간제 멤버 ${gs}명 기록도 함께 지워집니다.`))return false;
-    state.roots=state.roots.filter(x=>x.id!==id);
-    state.children=state.children.filter(c=>c.rootId!==id);
-    state.guests=state.guests.filter(g=>g.rootId!==id);
-    state.courses.forEach(c=>{if(c.rootId===id)c.rootId=''});
-  }else if(type==='child'){
-    const child=state.children.find(x=>x.id===id);
-    if(!confirm(`상시 멤버 '${child?.name}'을(를) 삭제합니다.`))return false;
-    state.children=state.children.filter(x=>x.id!==id);
-  }else if(type==='guest'){
-    const guest=state.guests.find(x=>x.id===id);
-    if(!confirm(`기간제 멤버 '${guest?.name}'을(를) 삭제합니다.\n실제 워크스페이스에서 제거했는지 먼저 확인하세요.`))return false;
-    state.guests=state.guests.filter(x=>x.id!==id);
-  }else{
-    const course=state.courses.find(x=>x.id===id);
-    const linked=state.guests.filter(g=>g.courseId===id).length;
-    if(!confirm(`강의 '${course?.title}'을(를) 삭제합니다.${linked?`\n연결된 기간제 멤버 ${linked}명은 강의 미지정으로 남습니다.`:''}`))return false;
-    state.courses=state.courses.filter(x=>x.id!==id);
-    state.guests.forEach(g=>{if(g.courseId===id)g.courseId=''});
+  const item=state.slots.find(s=>s.id===editing);
+  if(!item)return false;
+  if(!confirm(`${item.date} · ${item.account}\n이 계정 행을 삭제합니다.`))return false;
+  state.slots=state.slots.filter(s=>s.id!==editing);
+  persist();showToast("삭제했습니다.");return true;
+}
+
+// ---- 복사 ------------------------------------------------------------------
+function toTsv(slots){
+  return ["날짜\t과정명\t이름\t계정\t메모",
+    ...slots.map(s=>[s.date,s.course,s.name,s.account,s.memo].join("\t"))].join("\n");
+}
+async function copyText(text, message){
+  try{await navigator.clipboard.writeText(text);showToast(message)}
+  catch{
+    const ta=document.createElement("textarea");ta.value=text;document.body.appendChild(ta);ta.select();
+    try{document.execCommand("copy");showToast(message)}catch{showToast("복사에 실패했습니다.")}
+    ta.remove();
   }
-  persist();showToast('삭제했습니다.');return true;
 }
 
 // ---- 이벤트 ----------------------------------------------------------------
-function switchView(view){currentView=view;document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===`${view}View`));document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.view===view));const titles={dashboard:'운영 현황',accounts:'워크스페이스 관리',courses:'강의 일정',guests:'기간제 멤버',settings:'연결 설정'};document.querySelector('#pageTitle').textContent=titles[view];document.querySelector('.sidebar').classList.remove('open')}
+function switchView(view){
+  currentView=view;
+  document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===`${view}View`));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.view===view));
+  document.querySelector('#pageTitle').textContent={roster:'계정 일정',settings:'연결 설정'}[view];
+  document.querySelector('.sidebar').classList.remove('open');
+}
 
 document.addEventListener('click',e=>{
   const t=e.target.closest('button');if(!t)return;
   if(t.dataset.view)switchView(t.dataset.view);
-  if(t.dataset.go)switchView(t.dataset.go);
-  if(t.dataset.add)openEditor(t.dataset.add);
-  if(t.dataset.addChild)openEditor('child',null,t.dataset.addChild);
-  if(t.dataset.editRoot)openEditor('root',t.dataset.editRoot);
-  if(t.dataset.editChild)openEditor('child',t.dataset.editChild);
-  if(t.dataset.editGuest)openEditor('guest',t.dataset.editGuest);
-  if(t.dataset.editCourse)openEditor('course',t.dataset.editCourse);
+  if(t.dataset.editSlot)openEditor(t.dataset.editSlot);
+  if(t.dataset.addDate)openEditor(null,t.dataset.addDate);
+  if(t.id==='addSlotButton')openEditor();
   if(t.hasAttribute('data-close-editor'))document.querySelector('#editorDialog').close();
   if(t.id==='deleteRecord'&&deleteRecord())document.querySelector('#editorDialog').close();
-  if(t.hasAttribute('data-open-import')){document.querySelector('#importForm').reset();document.querySelector('#importResult').className='import-result';document.querySelector('#importResult').textContent='';document.querySelector('#importDialog').showModal()}
-  if(t.hasAttribute('data-close-import'))document.querySelector('#importDialog').close();
-  if(t.dataset.removeGuest){const g=state.guests.find(x=>x.id===t.dataset.removeGuest);g.removedAt=isoDate(today);persist()}
-  if(t.id==='deleteSelectedGuests')deleteSelectedGuests();
-  if(t.id==='quickAddButton')openEditor(currentView==='accounts'?'root':currentView==='guests'?'guest':'course');
+
+  if(t.dataset.copyDate){
+    const group=groupedDates({includePast:true}).find(g=>g.date===t.dataset.copyDate);
+    if(group)copyText(toTsv(group.rows),`${fmtDay(group.date)} ${group.rows.length}개를 복사했습니다.`);
+  }
+  if(t.dataset.clearDate){
+    const date=t.dataset.clearDate, rows=state.slots.filter(s=>s.date===date);
+    if(rows.length && confirm(`${fmtDay(date)}의 계정 ${rows.length}개를 모두 삭제합니다.`)){
+      state.slots=state.slots.filter(s=>s.date!==date);persist();showToast(`${rows.length}개를 삭제했습니다.`);
+    }
+  }
+  if(t.id==='deleteSelected'){
+    const targets=state.slots.filter(s=>selected.has(s.id));
+    if(targets.length && confirm(`선택한 계정 ${targets.length}개를 삭제합니다.`)){
+      state.slots=state.slots.filter(s=>!selected.has(s.id));selected.clear();persist();showToast(`${targets.length}개를 삭제했습니다.`);
+    }
+  }
+  if(t.id==='copyAllButton'){
+    const rows=groupedDates().flatMap(g=>g.rows);
+    rows.length?copyText(toTsv(rows),`${rows.length}개를 복사했습니다.`):showToast("복사할 일정이 없습니다.");
+  }
+  if(t.id==='clearPastButton'){
+    const rows=state.slots.filter(s=>s.date<TODAY);
+    if(!rows.length){showToast("지난 일정이 없습니다.");return}
+    if(confirm(`지난 날짜의 계정 ${rows.length}개를 모두 삭제합니다.\n되돌릴 수 없습니다.`)){
+      state.slots=state.slots.filter(s=>s.date>=TODAY);persist();showToast(`지난 일정 ${rows.length}개를 삭제했습니다.`);
+    }
+  }
+
+  if(t.id==='pasteButton'){
+    const form=document.querySelector('#pasteForm');form.reset();
+    document.querySelector('#pasteResult').className='import-result';
+    document.querySelector('#pasteResult').textContent='';
+    document.querySelector('#pasteDialog').showModal();
+    setTimeout(()=>document.querySelector('#pasteInput').focus(),50);
+  }
+  if(t.hasAttribute('data-close-paste'))document.querySelector('#pasteDialog').close();
+
   if(t.id==='menuButton')document.querySelector('.sidebar').classList.toggle('open');
-  if(t.id==='prevMonth'){calendarDate=new Date(calendarDate.getFullYear(),calendarDate.getMonth()-1,1);renderCalendar()}
-  if(t.id==='nextMonth'){calendarDate=new Date(calendarDate.getFullYear(),calendarDate.getMonth()+1,1);renderCalendar()}
   if(t.id==='refreshButton')loadRemote();
-  if(t.id==='saveSettings'){const url=document.querySelector('#apiUrlInput').value.trim();if(url&&!/^https:\/\/script\.google\.com\//.test(url)){showToast('Apps Script 웹 앱 URL을 확인해 주세요.');return}
-    // 칸을 비우고 저장하면 재정의를 지워 config.js 기본값으로 되돌린다.
+  if(t.id==='saveSettings'){
+    const url=document.querySelector('#apiUrlInput').value.trim();
+    if(url&&!/^https:\/\/script\.google\.com\//.test(url)){showToast('Apps Script 웹 앱 URL을 확인해 주세요.');return}
     url?localStorage.setItem(API_KEY,url):localStorage.removeItem(API_KEY);
-    showToast(url?'연결 설정을 저장했습니다.':'기본 주소로 되돌렸습니다.');renderSettings();loadRemote()}
-  if(t.id==='disconnectButton'){localStorage.setItem(API_KEY,'');document.querySelector('#apiUrlInput').value='';setSync('','로컬 데이터');renderSettings();showToast('이 브라우저에서 Sheets 연결을 해제했습니다.')}
+    showToast(url?'연결 설정을 저장했습니다.':'기본 주소로 되돌렸습니다.');renderSettings();loadRemote();
+  }
+  if(t.id==='disconnectButton'){
+    localStorage.setItem(API_KEY,'');document.querySelector('#apiUrlInput').value='';
+    setSync('','로컬 데이터');renderSettings();showToast('이 브라우저에서 Sheets 연결을 해제했습니다.');
+  }
 });
 
 document.querySelector('#editorForm').addEventListener('submit',e=>{e.preventDefault();if(saveEditor(e.currentTarget))document.querySelector('#editorDialog').close()});
-document.querySelector('#importForm').addEventListener('submit',async e=>{e.preventDefault();const result=document.querySelector('#importResult'),file=document.querySelector('#csvFile').files[0];if(!file)return;try{const rows=parseCsv(await readCsvText(file));if(!rows.length)throw new Error('등록할 데이터가 없습니다.');const imported=importMembers(rows);if(imported.errors.length){result.className='import-result show';result.textContent=`등록 전 확인이 필요한 항목이 있습니다.\n${imported.errors.slice(0,8).join('\n')}${imported.errors.length>8?`\n외 ${imported.errors.length-8}건`:''}`;return}state.children.push(...imported.children);state.guests.push(...imported.guests);await persist();result.className='import-result show success';result.textContent=`상시 멤버 ${imported.children.length}명, 기간제 멤버 ${imported.guests.length}명을 등록했습니다.`;document.querySelector('#csvFile').value='';showToast('CSV 일괄 등록을 완료했습니다.')}catch(error){result.className='import-result show';result.textContent=error.message||'CSV 파일을 읽지 못했습니다.'}});
-['accountSearch','accountFilter'].forEach(id=>document.querySelector(`#${id}`).addEventListener('input',renderAccounts));
-['guestSearch','guestFilter'].forEach(id=>document.querySelector(`#${id}`).addEventListener('input',()=>{selectedGuests.clear();renderGuests()}));
-document.querySelector('#guestTable').addEventListener('change',e=>{
-  const box=e.target.closest('input[data-guest]');if(!box)return;
-  box.checked?selectedGuests.add(box.dataset.guest):selectedGuests.delete(box.dataset.guest);
-  syncGuestSelection();
+
+document.querySelector('#pasteForm').addEventListener('submit',e=>{
+  e.preventDefault();
+  const slots=previewPaste();
+  if(!slots||!slots.length)return;
+  const mode=document.querySelector('#pasteMode').value;
+  if(mode==='replace'){
+    const dates=new Set(slots.map(s=>s.date));
+    state.slots=state.slots.filter(s=>!dates.has(s.date));
+  }
+  state.slots.push(...slots);
+  selected.clear();persist();
+  document.querySelector('#pasteDialog').close();
+  showToast(`계정 ${slots.length}개를 등록했습니다.`);
 });
-document.querySelector('#guestSelectAll').addEventListener('change',e=>{
-  document.querySelectorAll('#guestTable input[data-guest]').forEach(box=>{
-    box.checked=e.target.checked;
-    e.target.checked?selectedGuests.add(box.dataset.guest):selectedGuests.delete(box.dataset.guest);
-  });
-  syncGuestSelection();
+document.querySelector('#pasteInput').addEventListener('input',previewPaste);
+document.querySelector('#pasteDate').addEventListener('change',previewPaste);
+
+document.querySelector('#rosterSearch').addEventListener('input',renderRoster);
+document.querySelector('#showPast').addEventListener('change',()=>{selected.clear();renderRoster()});
+document.querySelector('#dateList').addEventListener('change',e=>{
+  const row=e.target.closest('input[data-slot]');
+  if(row){row.checked?selected.add(row.dataset.slot):selected.delete(row.dataset.slot);syncSelectionUi();return}
+  const head=e.target.closest('input[data-check-date]');
+  if(head){
+    const card=head.closest('.date-card');
+    card.querySelectorAll('input[data-slot]').forEach(box=>{
+      box.checked=head.checked;
+      head.checked?selected.add(box.dataset.slot):selected.delete(box.dataset.slot);
+    });
+    syncSelectionUi();
+  }
 });
-document.querySelector('#ownerSeatToggle').addEventListener('change',e=>{state.settings.ownerUsesSeat=e.target.checked;persist()});
 
 document.querySelector('#todayLabel').textContent=new Intl.DateTimeFormat('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'long'}).format(today);
 if(apiUrl())setSync('connected','Google Sheets 연결됨');
