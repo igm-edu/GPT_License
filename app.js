@@ -6,23 +6,23 @@ const addDays = n => isoDate(new Date(today.getTime() + n * DAY));
 const uid = prefix => `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const escapeHtml = value => String(value ?? "").replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
 const pad2 = v => String(v).padStart(2, "0");
+const FIELDS = ["date","course","name","account","memo"];
 
 const demoData = {
   slots: [
-    {id:"s1",date:addDays(3),course:"태림페이퍼",name:"김동주",account:"coramdeo0916@example.com",memo:""},
-    {id:"s2",date:addDays(3),course:"태림페이퍼",name:"김윤정",account:"kyja_a@example.com",memo:""},
-    {id:"s3",date:addDays(3),course:"태림페이퍼",name:"김주원",account:"juwonhaha@example.com",memo:""},
-    {id:"s4",date:addDays(4),course:"현대해상",name:"이재욱",account:"wodnr123dla@example.com",memo:""},
-    {id:"s5",date:addDays(4),course:"현대해상",name:"이정섭",account:"jeongseob82@example.com",memo:""},
-    {id:"s6",date:addDays(-2),course:"아그네스",name:"정의웅",account:"a01027825612@example.com",memo:"지난 일정"}
+    {id:"s1",date:addDays(0),course:"태림페이퍼",name:"김동주",account:"coramdeo0916@example.com",memo:""},
+    {id:"s2",date:addDays(0),course:"태림페이퍼",name:"김윤정",account:"kyja_a@example.com",memo:""},
+    {id:"s3",date:addDays(1),course:"현대해상",name:"이재욱",account:"wodnr123dla@example.com",memo:""},
+    {id:"s4",date:addDays(-3),course:"아그네스",name:"정의웅",account:"a01027825612@example.com",memo:"지난 일정"}
   ],
   settings:{}
 };
 
 let state = loadLocal();
 let currentView = "roster";
-let editing = null;
 let selected = new Set();
+let lastDeleted = null;
+let saveTimer = null;
 
 function loadLocal(){try{return JSON.parse(localStorage.getItem("gpt-account-manager-data")) || structuredClone(demoData)}catch{return structuredClone(demoData)}}
 
@@ -33,10 +33,16 @@ function defaultApiUrl(){return window.APP_CONFIG?.appsScriptUrl || ""}
 function apiUrl(){const saved=localStorage.getItem(API_KEY);return saved!==null?saved:defaultApiUrl()}
 function apiSource(){const saved=localStorage.getItem(API_KEY);return saved===null?(defaultApiUrl()?"default":"none"):(saved?"custom":"off")}
 
-function showToast(message){const el=document.querySelector("#toast");el.textContent=message;el.classList.add("show");setTimeout(()=>el.classList.remove("show"),2200)}
-function fmtDay(d){return new Intl.DateTimeFormat("ko-KR",{month:"long",day:"numeric",weekday:"short"}).format(new Date(`${d}T00:00`))}
-function daysFromToday(d){return Math.round((new Date(`${d}T00:00`) - new Date(`${TODAY}T00:00`))/DAY)}
-function dLabel(d){const n=daysFromToday(d);return n===0?"오늘":n>0?`D-${n}`:`${-n}일 전`}
+function showToast(message, undo){
+  const el=document.querySelector("#toast"), action=document.querySelector("#toastAction");
+  document.querySelector("#toastText").textContent=message;
+  action.hidden=!undo;
+  action.onclick=undo?()=>{undo();el.classList.remove("show")}:null;
+  el.classList.add("show");
+  clearTimeout(showToast.timer);
+  showToast.timer=setTimeout(()=>el.classList.remove("show"), undo?6000:2200);
+}
+function fmtDay(d){try{return new Intl.DateTimeFormat("ko-KR",{month:"long",day:"numeric",weekday:"short"}).format(new Date(`${d}T00:00`))}catch{return d}}
 
 // ---- 날짜 해석 --------------------------------------------------------------
 // 엑셀에서 온 "09월 21일(월)", "2026-09-21", "9/21" 같은 표기를 모두 받아들인다.
@@ -48,19 +54,16 @@ function parseDateCell(raw){
   m = text.match(/(\d{1,2})\s*[-./월]\s*(\d{1,2})/);
   if(m){
     const month=+m[1], day=+m[2];
-    if(month<1||month>12||day<1||day>31) return "";
-    let year = today.getFullYear();
-    let candidate = valid(year, month, day);
+    let candidate = valid(today.getFullYear(), month, day);
     // 반년 이상 지난 날짜면 내년 것으로 본다. 연말·연초에 붙여넣을 때를 위한 처리다.
-    if(candidate && candidate < isoDate(new Date(today.getTime() - 180*DAY))) candidate = valid(year+1, month, day);
+    if(candidate && candidate < isoDate(new Date(today.getTime() - 180*DAY))) candidate = valid(today.getFullYear()+1, month, day);
     return candidate;
   }
   return "";
   function valid(y,mo,d){
     if(mo<1||mo>12||d<1||d>31) return "";
     const iso=`${y}-${pad2(mo)}-${pad2(d)}`;
-    const check=new Date(`${iso}T00:00`);
-    return Number.isNaN(check.getTime()) ? "" : iso;
+    return Number.isNaN(new Date(`${iso}T00:00`).getTime()) ? "" : iso;
   }
 }
 const looksLikeEmail = v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v??"").trim());
@@ -76,8 +79,34 @@ function normalize(){
     s.date = parseDateCell(s.date) || String(s.date ?? "").slice(0,10);
     ["course","name","account","memo"].forEach(k=>{s[k]=String(s[k] ?? "").trim()});
   });
-  state.slots = state.slots.filter(s=>s.date && s.account);
+  // 날짜와 계정이 모두 빈 행은 흔적만 남은 줄이므로 버린다.
+  state.slots = state.slots.filter(s=>s.date || s.account || s.course || s.name || s.memo);
 }
+function saveLocal(){localStorage.setItem("gpt-account-manager-data",JSON.stringify(state))}
+
+// 칸을 고칠 때마다 시트로 보내면 너무 잦다. 로컬은 즉시, 원격은 잠시 모았다 보낸다.
+function queueSave(){
+  saveLocal();
+  if(!apiUrl())return;
+  setSync("loading","저장 대기 중");
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(pushRemote, 1200);
+}
+async function pushRemote(){
+  if(!apiUrl())return;
+  setSync("loading","저장 중");
+  try{
+    const res=await fetch(apiUrl(),{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"saveAll",data:state})});
+    const json=await res.json();
+    if(json.ok===false)throw new Error(json.error);
+    setSync("connected","Google Sheets 연결됨");
+  }catch(e){
+    setSync("error","동기화 실패 · 로컬 저장됨");
+    showToast("로컬에는 저장했지만 Sheets 동기화에 실패했습니다.");
+  }
+}
+// 행이 늘거나 줄면 화면을 다시 그리고 저장한다.
+function commit(){normalize();renderAll();queueSave()}
 
 async function loadRemote(){
   if(!apiUrl())return renderAll();
@@ -87,107 +116,82 @@ async function loadRemote(){
     if(!res.ok)throw new Error();
     const json=await res.json();
     if(json.ok===false)throw new Error(json.error);
-    state=json.data;normalize();
-    localStorage.setItem("gpt-account-manager-data",JSON.stringify(state));
+    state=json.data;normalize();saveLocal();
     setSync("connected","Google Sheets 연결됨");renderAll();
   }catch(e){
     setSync("error","연결 오류 · 로컬 데이터");
     showToast("Sheets 연결에 실패해 로컬 데이터를 표시합니다.");renderAll();
   }
 }
-async function persist(){
-  normalize();renderAll();
-  localStorage.setItem("gpt-account-manager-data",JSON.stringify(state));
-  if(!apiUrl())return;
-  setSync("loading","저장 중");
-  try{
-    const res=await fetch(apiUrl(),{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"saveAll",data:state})});
-    const json=await res.json();
-    if(json.ok===false)throw new Error(json.error);
-    setSync("connected","Google Sheets 연결됨");showToast("Google Sheets에 저장했습니다.");
-  }catch(e){
-    setSync("error","동기화 실패 · 로컬 저장됨");showToast("로컬에는 저장했지만 Sheets 동기화에 실패했습니다.");
-  }
-}
 function setSync(type,label){document.querySelector("#syncLabel").textContent=label;document.querySelector("#syncDot").className=`sync-dot ${type==="connected"?"connected":""}`}
 
 // ---- 조회 ------------------------------------------------------------------
-function searchText(){return document.querySelector("#rosterSearch").value.trim().toLowerCase()}
-function showingPast(){return document.querySelector("#showPast").checked}
-function matches(slot,q){return !q || [slot.course,slot.name,slot.account,slot.memo].join(" ").toLowerCase().includes(q)}
+const searchText = () => document.querySelector("#rosterSearch").value.trim().toLowerCase();
+const showingPast = () => document.querySelector("#showPast").checked;
+const pastCount = () => state.slots.filter(s=>s.date && s.date < TODAY).length;
 
-// 날짜별로 묶어 돌려준다. 지난 날짜는 기본으로 감춘다.
-function groupedDates({includePast=showingPast(), query=searchText()}={}){
-  const map=new Map();
-  state.slots.forEach(s=>{
-    if(!includePast && s.date < TODAY) return;
-    if(!matches(s,query)) return;
-    (map.get(s.date) || map.set(s.date,[]).get(s.date)).push(s);
-  });
-  return [...map.entries()].sort(([a],[b])=>a.localeCompare(b))
-    .map(([date,rows])=>({date, rows:rows.slice().sort((x,y)=>
-      (x.course||"").localeCompare(y.course||"") || (x.name||"").localeCompare(y.name||"") || x.account.localeCompare(y.account))}));
+function visibleSlots(){
+  const q=searchText(), past=showingPast();
+  return state.slots
+    .filter(s=>(past || !s.date || s.date >= TODAY))
+    .filter(s=>!q || [s.date,s.course,s.name,s.account,s.memo].join(" ").toLowerCase().includes(q))
+    // 날짜로만 정렬한다. 같은 날짜 안에서는 입력한 순서를 지켜야 편집 중 행이 튀지 않는다.
+    .slice().sort((a,b)=>(a.date||"9999-99-99").localeCompare(b.date||"9999-99-99"));
 }
-const pastCount = () => state.slots.filter(s=>s.date < TODAY).length;
 
 // ---- 렌더 ------------------------------------------------------------------
-function renderAll(){normalize();pruneSelection();renderHero();renderRoster();renderSettings()}
+function renderAll(){normalize();pruneSelection();renderStats();renderSheet();renderSettings()}
 
-function renderHero(){
-  const upcoming=groupedDates({includePast:false, query:""});
-  const totalAccounts=upcoming.reduce((a,g)=>a+g.rows.length,0);
-  const uniqueAccounts=new Set(upcoming.flatMap(g=>g.rows.map(r=>r.account.toLowerCase()))).size;
-  const busiest=upcoming.slice().sort((a,b)=>b.rows.length-a.rows.length)[0];
-  document.querySelector("#heroDays").textContent=upcoming.length;
-  document.querySelector("#heroNote").textContent=upcoming.length
-    ? `가장 가까운 일정은 ${fmtDay(upcoming[0].date)} · ${upcoming[0].rows.length}개 계정입니다.`
-    : "등록된 다가오는 일정이 없습니다. 엑셀에서 붙여넣어 시작하세요.";
+function renderStats(){
+  const upcoming=state.slots.filter(s=>s.date>=TODAY);
+  const days=new Set(upcoming.map(s=>s.date)).size;
+  const unique=new Set(upcoming.map(s=>s.account.toLowerCase()).filter(Boolean)).size;
+  const byDay={};upcoming.forEach(s=>{byDay[s.date]=(byDay[s.date]||0)+1});
+  const peak=Object.entries(byDay).sort((a,b)=>b[1]-a[1])[0];
   const cards=[
-    ['다가오는 일정', upcoming.length, '일', '▤'],
-    ['총 계정', totalAccounts, `중복 제외 ${uniqueAccounts}개`, '◫'],
-    ['가장 많은 날', busiest?busiest.rows.length:0, busiest?fmtDay(busiest.date):'없음', '↗'],
-    ['지난 일정', pastCount(), '자동으로 숨김', '⏱']
+    ["다가오는 일정",days,"일"],
+    ["총 계정",upcoming.length,`중복 제외 ${unique}개`],
+    ["가장 많은 날",peak?peak[1]:0,peak?fmtDay(peak[0]):"없음"],
+    ["지난 일정",pastCount(),"자동으로 숨김"]
   ];
-  document.querySelector("#metrics").innerHTML=cards.map(x=>
-    `<article class="metric"><div class="metric-head"><span>${x[0]}</span><i class="metric-icon">${x[3]}</i></div><strong>${x[1]}</strong><small>${escapeHtml(x[2])}</small></article>`).join("");
+  document.querySelector("#statStrip").innerHTML=cards.map(c=>
+    `<div class="stat"><span>${c[0]}</span><strong>${c[1]}</strong><small>${escapeHtml(c[2])}</small></div>`).join("");
 }
 
-function renderRoster(){
-  const groups=groupedDates();
-  const past=pastCount();
-  document.querySelector("#showPastLabel").textContent = past ? `지난 날짜 보기 (${past})` : "지난 날짜 보기";
-  document.querySelector("#dateList").innerHTML = groups.length ? groups.map(g=>{
-    const isPast=g.date<TODAY;
-    return `<article class="card date-card ${isPast?'past':''}">
-      <div class="date-head">
-        <div class="date-title">
-          <p class="eyebrow">${escapeHtml(dLabel(g.date))}</p>
-          <h3>${escapeHtml(fmtDay(g.date))}</h3>
-        </div>
-        <span class="count-badge">${g.rows.length}</span>
-        <div class="date-actions">
-          <button class="mini-button" data-copy-date="${g.date}">복사</button>
-          <button class="mini-button" data-add-date="${g.date}">+ 추가</button>
-          <button class="mini-button" data-clear-date="${g.date}">비우기</button>
-        </div>
-      </div>
-      <div class="table-wrap"><table>
-        <thead><tr>
-          <th class="check-col"><input type="checkbox" data-check-date="${g.date}" aria-label="${escapeHtml(fmtDay(g.date))} 전체 선택"></th>
-          <th class="no-col">No</th><th>과정명</th><th>이름</th><th>계정</th><th>메모</th><th></th>
-        </tr></thead>
-        <tbody>${g.rows.map((s,i)=>`<tr>
-          <td class="check-col"><input type="checkbox" data-slot="${s.id}" ${selected.has(s.id)?'checked':''} aria-label="${escapeHtml(s.account)} 선택"></td>
-          <td class="no-col">${i+1}</td>
-          <td>${escapeHtml(s.course||'-')}</td>
-          <td>${escapeHtml(s.name||'-')}</td>
-          <td><code class="account">${escapeHtml(s.account)}</code></td>
-          <td class="memo-cell">${escapeHtml(s.memo||'')}</td>
-          <td><div class="row-actions"><button class="mini-button" data-edit-slot="${s.id}">수정</button></div></td>
-        </tr>`).join("")}</tbody>
-      </table></div>
-    </article>`;
-  }).join("") : `<div class="card"><div class="empty">${searchText()?"검색 결과가 없습니다.":"등록된 일정이 없습니다. 오른쪽 위 <b>엑셀 붙여넣기</b>로 시작하세요."}</div></div>`;
+const cell = (id,field,value,type="text") =>
+  `<td class="${field}-cell"><input class="cell" type="${type}" data-id="${id}" data-field="${field}" value="${escapeHtml(value)}" ${field==='account'?'inputmode="email" spellcheck="false"':''}></td>`;
+
+function renderSheet(){
+  const rows=visibleSlots();
+  const body=document.querySelector("#sheetBody");
+  let prevDate=null;
+  const html=rows.map((s,i)=>{
+    const groupStart = s.date!==prevDate;
+    prevDate=s.date;
+    const isPast = s.date && s.date < TODAY;
+    return `<tr data-row="${s.id}" class="${isPast?'past':''} ${groupStart?'group-start':''}">
+      <td class="check-col"><input type="checkbox" data-sel="${s.id}" ${selected.has(s.id)?'checked':''} aria-label="행 선택"></td>
+      <td class="no-col">${i+1}</td>
+      ${cell(s.id,"date",s.date,"date")}
+      ${cell(s.id,"course",s.course)}
+      ${cell(s.id,"name",s.name)}
+      ${cell(s.id,"account",s.account)}
+      ${cell(s.id,"memo",s.memo)}
+      <td class="end-col"><button class="row-delete" data-del="${s.id}" title="행 삭제" aria-label="행 삭제">×</button></td>
+    </tr>`;
+  }).join("");
+  // 맨 아래 빈 줄. 여기에 입력하면 새 행이 생긴다.
+  const nextDate = rows.length ? rows[rows.length-1].date : TODAY;
+  const blank=`<tr data-row="__new__" class="blank-row">
+    <td class="check-col"></td><td class="no-col">+</td>
+    ${cell("__new__","date",nextDate,"date")}
+    ${cell("__new__","course","")}
+    ${cell("__new__","name","")}
+    ${cell("__new__","account","")}
+    ${cell("__new__","memo","")}
+    <td class="end-col"></td></tr>`;
+  body.innerHTML = html + blank;
+  document.querySelector("#showPastLabel").textContent = pastCount() ? `지난 날짜 보기 (${pastCount()})` : "지난 날짜 보기";
   syncSelectionUi();
 }
 
@@ -205,32 +209,105 @@ function renderSettings(){
 // ---- 선택 ------------------------------------------------------------------
 function pruneSelection(){const ids=new Set(state.slots.map(s=>s.id));[...selected].forEach(id=>{if(!ids.has(id))selected.delete(id)})}
 function syncSelectionUi(){
-  const boxes=[...document.querySelectorAll('#dateList input[data-slot]')];
+  const boxes=[...document.querySelectorAll('#sheetBody input[data-sel]')];
   const checked=boxes.filter(b=>b.checked).length;
-  document.querySelectorAll('#dateList input[data-check-date]').forEach(head=>{
-    const rows=[...document.querySelectorAll(`#dateList input[data-slot]`)].filter(b=>b.closest('.date-card')===head.closest('.date-card'));
-    const on=rows.filter(b=>b.checked).length;
-    head.checked=rows.length>0&&on===rows.length;
-    head.indeterminate=on>0&&on<rows.length;
-  });
+  const all=document.querySelector('#selectAll');
+  all.checked=boxes.length>0&&checked===boxes.length;
+  all.indeterminate=checked>0&&checked<boxes.length;
   const btn=document.querySelector('#deleteSelected');
   btn.hidden=checked===0;
   btn.textContent=`선택 ${checked}개 삭제`;
 }
 
-// ---- 엑셀 붙여넣기 ----------------------------------------------------------
+// ---- 칸 편집 ----------------------------------------------------------------
+function applyEdit(id, field, raw){
+  const value = field==="date" ? (parseDateCell(raw) || "") : String(raw).trim();
+  if(id==="__new__"){
+    // 빈 줄에 뭔가 적으면 실제 행으로 만든다.
+    const blank=document.querySelector('tr[data-row="__new__"]');
+    const draft={id:uid('s'),date:"",course:"",name:"",account:"",memo:""};
+    FIELDS.forEach(f=>{
+      const input=blank.querySelector(`input[data-field="${f}"]`);
+      draft[f]= f==="date" ? (parseDateCell(input.value)||"") : input.value.trim();
+    });
+    draft[field]=value;
+    if(!draft.date) draft.date=TODAY;
+    state.slots.push(draft);
+    commit();
+    // 새로 생긴 행의 같은 칸으로 초점을 돌려준다.
+    const next=document.querySelector(`input[data-id="${draft.id}"][data-field="${field}"]`);
+    if(next){next.focus();next.setSelectionRange?.(next.value.length,next.value.length)}
+    return;
+  }
+  const slot=state.slots.find(s=>s.id===id);
+  if(!slot)return;
+  if(slot[field]===value){if(field==="date")renderSheet();return}
+  slot[field]=value;
+  // 날짜가 바뀌면 정렬 위치가 달라지므로 다시 그린다.
+  if(field==="date"){commit()}
+  else{saveLocal();queueSave();renderStats()}
+}
+
+function deleteRows(ids, label){
+  const removed=state.slots.filter(s=>ids.includes(s.id));
+  if(!removed.length)return;
+  const snapshot=removed.map(s=>({...s}));
+  state.slots=state.slots.filter(s=>!ids.includes(s.id));
+  ids.forEach(id=>selected.delete(id));
+  commit();
+  showToast(label||`${removed.length}개 행을 삭제했습니다.`, ()=>{
+    state.slots.push(...snapshot);commit();showToast("되돌렸습니다.");
+  });
+}
+
+// 칸 안에서 Ctrl+V 하면 엑셀 표가 그 칸부터 아래·오른쪽으로 채워진다.
+function pasteIntoSheet(startInput, text){
+  const grid=String(text).replace(/\r\n?/g,"\n").split("\n").map(l=>l.split("\t"));
+  while(grid.length && grid[grid.length-1].every(c=>!String(c).trim())) grid.pop();
+  if(!grid.length)return false;
+  const startField=startInput.dataset.field;
+  const startCol=FIELDS.indexOf(startField);
+  if(startCol<0)return false;
+  const order=visibleSlots().map(s=>s.id);
+  let rowIdx=order.indexOf(startInput.dataset.id);
+  const appending=startInput.dataset.id==="__new__";
+  if(rowIdx<0 && !appending)return false;
+  // 붙여넣은 표에 날짜 열이 없으면 그 줄에 보이던 날짜를 쓴다.
+  const rowOf=startInput.closest('tr');
+  const fallbackDate=parseDateCell(rowOf?.querySelector('input[data-field="date"]')?.value) || TODAY;
+
+  let touched=0;
+  grid.forEach((line,r)=>{
+    const targetId = appending ? null : order[rowIdx+r];
+    let slot = targetId ? state.slots.find(s=>s.id===targetId) : null;
+    if(!slot){
+      slot={id:uid('s'),date:"",course:"",name:"",account:"",memo:""};
+      state.slots.push(slot);
+    }
+    line.forEach((raw,c)=>{
+      const field=FIELDS[startCol+c];
+      if(!field)return;
+      slot[field]= field==="date" ? (parseDateCell(raw)||slot.date) : String(raw).trim();
+    });
+    if(!slot.date) slot.date=fallbackDate;
+    touched++;
+  });
+  commit();
+  showToast(`${touched}개 행을 붙여넣었습니다.`);
+  return true;
+}
+
+// ---- 엑셀 붙여넣기 창 (날짜가 여러 열로 나뉜 표) -------------------------------
 const LABEL = {
   course: /과정|과목|교육|기업|고객/,
   name: /이름|성명|성함|담당/,
   account: /계정|이메일|메일|아이디|id/i,
   memo: /메모|비고|참고/
 };
-
-// 머리글에 날짜가 있는 표. 날짜 열에는 계정이 들어 있고, 그 앞의 열들이 과정명·이름이다.
 function parseByDateHeader(rows){
   let headerIdx=-1, dateCols=[];
   for(let i=0;i<Math.min(rows.length,10);i++){
-    const found=rows[i].map((cell,idx)=>({idx,date:parseDateCell(cell)})).filter(x=>x.date);
+    const found=rows[i].map((cellValue,idx)=>({idx,date:parseDateCell(cellValue)})).filter(x=>x.date);
     if(found.length){headerIdx=i;dateCols=found;break}
   }
   if(headerIdx<0) return null;
@@ -254,14 +331,11 @@ function parseByDateHeader(rows){
       slots.push({id:uid('s'),date:g.date,
         course:String(row[g.attrs.course]??"").trim(),
         name:String(row[g.attrs.name]??"").trim(),
-        account,
-        memo:String(row[g.attrs.memo]??"").trim()});
+        account, memo:String(row[g.attrs.memo]??"").trim()});
     });
   });
   return slots;
 }
-
-// 날짜 머리글이 없는 표. 화면에서 고른 날짜를 쓰고, 열은 머리글 이름이나 형태로 짐작한다.
 function parseSingleDate(rows, date){
   if(!date) return null;
   const header=rows[0]?.map(c=>String(c??"").trim()) || [];
@@ -270,9 +344,8 @@ function parseSingleDate(rows, date){
     Object.entries(LABEL).forEach(([key,re])=>{if(mapped[key]===undefined && re.test(label)) mapped[key]=idx});
   });
   const hasHeader=mapped.account!==undefined || (mapped.course!==undefined && mapped.name!==undefined);
-  const body=hasHeader?rows.slice(1):rows;
   const slots=[];
-  body.forEach(row=>{
+  (hasHeader?rows.slice(1):rows).forEach(row=>{
     let account = mapped.account!==undefined ? String(row[mapped.account]??"").trim() : "";
     if(!account){const hit=row.find(looksLikeEmail);account=hit?String(hit).trim():""}
     if(!account) return;
@@ -281,15 +354,12 @@ function parseSingleDate(rows, date){
     if(!course || !name){
       // 머리글이 없으면 숫자와 계정을 뺀 나머지 칸을 순서대로 과정명·이름으로 본다.
       const rest=row.map(c=>String(c??"").trim()).filter(c=>c && c!==account && !/^\d+$/.test(c));
-      course=course||rest[0]||"";
-      name=name||rest[1]||"";
+      course=course||rest[0]||"";name=name||rest[1]||"";
     }
-    slots.push({id:uid('s'),date,course,name,account,
-      memo: mapped.memo!==undefined ? String(row[mapped.memo]??"").trim() : ""});
+    slots.push({id:uid('s'),date,course,name,account,memo: mapped.memo!==undefined ? String(row[mapped.memo]??"").trim() : ""});
   });
   return slots;
 }
-
 function parsePasted(text, fallbackDate){
   const rows=String(text||"").replace(/\r\n?/g,"\n").split("\n").map(line=>line.split("\t"));
   while(rows.length && rows[rows.length-1].every(c=>!String(c??"").trim())) rows.pop();
@@ -300,7 +370,6 @@ function parsePasted(text, fallbackDate){
   if(single===null) return {slots:[],error:"머리글에서 날짜를 찾지 못했습니다. 위에서 날짜를 골라 주세요."};
   return single.length ? {slots:single} : {slots:[],error:"계정이 들어 있는 행을 찾지 못했습니다."};
 }
-
 function previewPaste(){
   const box=document.querySelector("#pasteResult");
   const text=document.querySelector("#pasteInput").value;
@@ -308,44 +377,9 @@ function previewPaste(){
   const {slots,error}=parsePasted(text, document.querySelector("#pasteDate").value);
   if(error){box.className="import-result show";box.textContent=error;return null}
   const dates=[...new Set(slots.map(s=>s.date))].sort();
-  const sample=slots.slice(0,3).map(s=>`${s.date} · ${s.course||'-'} · ${s.name||'-'} · ${s.account}`).join("\n");
   box.className="import-result show success";
-  box.textContent=`${dates.length}개 날짜, 계정 ${slots.length}개를 찾았습니다.\n${dates.map(d=>`${d} (${slots.filter(s=>s.date===d).length})`).join(", ")}\n\n${sample}${slots.length>3?`\n… 외 ${slots.length-3}개`:""}`;
+  box.textContent=`${dates.length}개 날짜, 계정 ${slots.length}개를 찾았습니다.\n${dates.map(d=>`${d} (${slots.filter(s=>s.date===d).length})`).join(", ")}`;
   return slots;
-}
-
-// ---- 편집 ------------------------------------------------------------------
-const field=(name,label,type,value,extra="")=>`<label>${label}<input name="${name}" type="${type}" value="${escapeHtml(value)}" ${extra}></label>`;
-function openEditor(id=null, date=""){
-  editing=id;
-  const item=state.slots.find(s=>s.id===id) || {};
-  document.querySelector("#dialogTitle").textContent=id?"계정 수정":"계정 추가";
-  document.querySelector("#dialogEyebrow").textContent=id?"EDIT RECORD":"NEW RECORD";
-  document.querySelector("#formFields").innerHTML=
-    field("date","날짜","date",item.date||date||TODAY,"required")
-    +field("account","계정","text",item.account,"required placeholder=\"name@example.com\"")
-    +field("course","과정명","text",item.course)
-    +field("name","이름","text",item.name)
-    +`<label class="full">메모<input name="memo" type="text" value="${escapeHtml(item.memo||"")}"></label>`;
-  document.querySelector("#deleteRecord").hidden=!id;
-  document.querySelector("#editorDialog").showModal();
-}
-function saveEditor(form){
-  const v=Object.fromEntries(new FormData(form));
-  const date=parseDateCell(v.date);
-  if(!date){showToast("날짜를 확인해 주세요.");return false}
-  if(!String(v.account).trim()){showToast("계정을 입력해 주세요.");return false}
-  const item={id:editing||uid('s'),date,account:String(v.account).trim(),course:String(v.course).trim(),name:String(v.name).trim(),memo:String(v.memo).trim()};
-  const found=state.slots.find(s=>s.id===editing);
-  found?Object.assign(found,item):state.slots.push(item);
-  persist();return true;
-}
-function deleteRecord(){
-  const item=state.slots.find(s=>s.id===editing);
-  if(!item)return false;
-  if(!confirm(`${item.date} · ${item.account}\n이 계정 행을 삭제합니다.`))return false;
-  state.slots=state.slots.filter(s=>s.id!==editing);
-  persist();showToast("삭제했습니다.");return true;
 }
 
 // ---- 복사 ------------------------------------------------------------------
@@ -371,43 +405,71 @@ function switchView(view){
   document.querySelector('.sidebar').classList.remove('open');
 }
 
+const sheetBody = document.querySelector('#sheetBody');
+
+sheetBody.addEventListener('change',e=>{
+  const input=e.target.closest('input.cell');
+  if(input){applyEdit(input.dataset.id,input.dataset.field,input.value);return}
+  const box=e.target.closest('input[data-sel]');
+  if(box){box.checked?selected.add(box.dataset.sel):selected.delete(box.dataset.sel);syncSelectionUi()}
+});
+
+// Enter와 위아래 화살표로 같은 열을 오르내린다. Tab은 브라우저 기본 동작을 쓴다.
+sheetBody.addEventListener('keydown',e=>{
+  const input=e.target.closest('input.cell');
+  if(!input)return;
+  if(e.key!=='Enter'&&e.key!=='ArrowDown'&&e.key!=='ArrowUp')return;
+  if(input.type==='date'&&(e.key==='ArrowDown'||e.key==='ArrowUp'))return; // 날짜 칸의 값 증감은 그대로 둔다
+  e.preventDefault();
+  input.blur();
+  const rows=[...sheetBody.querySelectorAll('tr')];
+  const here=rows.indexOf(input.closest('tr'));
+  const step=e.key==='ArrowUp'?-1:1;
+  const target=rows[here+step]?.querySelector(`input[data-field="${input.dataset.field}"]`);
+  if(target){target.focus();target.select?.()}
+});
+
+sheetBody.addEventListener('paste',e=>{
+  const input=e.target.closest('input.cell');
+  if(!input)return;
+  const text=e.clipboardData?.getData('text/plain')||"";
+  if(!/[\t\n]/.test(text))return;   // 값 하나면 평범하게 붙여넣는다
+  e.preventDefault();
+  pasteIntoSheet(input,text);
+});
+
+document.querySelector('#selectAll').addEventListener('change',e=>{
+  sheetBody.querySelectorAll('input[data-sel]').forEach(box=>{
+    box.checked=e.target.checked;
+    e.target.checked?selected.add(box.dataset.sel):selected.delete(box.dataset.sel);
+  });
+  syncSelectionUi();
+});
+
 document.addEventListener('click',e=>{
   const t=e.target.closest('button');if(!t)return;
   if(t.dataset.view)switchView(t.dataset.view);
-  if(t.dataset.editSlot)openEditor(t.dataset.editSlot);
-  if(t.dataset.addDate)openEditor(null,t.dataset.addDate);
-  if(t.id==='addSlotButton')openEditor();
-  if(t.hasAttribute('data-close-editor'))document.querySelector('#editorDialog').close();
-  if(t.id==='deleteRecord'&&deleteRecord())document.querySelector('#editorDialog').close();
-
-  if(t.dataset.copyDate){
-    const group=groupedDates({includePast:true}).find(g=>g.date===t.dataset.copyDate);
-    if(group)copyText(toTsv(group.rows),`${fmtDay(group.date)} ${group.rows.length}개를 복사했습니다.`);
+  if(t.dataset.del){
+    const slot=state.slots.find(s=>s.id===t.dataset.del);
+    deleteRows([t.dataset.del], slot?`${slot.date} ${slot.account||'빈 행'} 삭제`:"삭제했습니다.");
   }
-  if(t.dataset.clearDate){
-    const date=t.dataset.clearDate, rows=state.slots.filter(s=>s.date===date);
-    if(rows.length && confirm(`${fmtDay(date)}의 계정 ${rows.length}개를 모두 삭제합니다.`)){
-      state.slots=state.slots.filter(s=>s.date!==date);persist();showToast(`${rows.length}개를 삭제했습니다.`);
-    }
-  }
-  if(t.id==='deleteSelected'){
-    const targets=state.slots.filter(s=>selected.has(s.id));
-    if(targets.length && confirm(`선택한 계정 ${targets.length}개를 삭제합니다.`)){
-      state.slots=state.slots.filter(s=>!selected.has(s.id));selected.clear();persist();showToast(`${targets.length}개를 삭제했습니다.`);
-    }
+  if(t.id==='deleteSelected')deleteRows([...selected]);
+  if(t.id==='addRowButton'){
+    const last=state.slots.slice().sort((a,b)=>(a.date||"").localeCompare(b.date||"")).pop();
+    state.slots.push({id:uid('s'),date:last?.date||TODAY,course:"",name:"",account:"",memo:""});
+    commit();
+    const rows=[...sheetBody.querySelectorAll('tr[data-row]')];
+    rows[rows.length-2]?.querySelector('input[data-field="course"]')?.focus();
   }
   if(t.id==='copyAllButton'){
-    const rows=groupedDates().flatMap(g=>g.rows);
-    rows.length?copyText(toTsv(rows),`${rows.length}개를 복사했습니다.`):showToast("복사할 일정이 없습니다.");
+    const rows=visibleSlots();
+    rows.length?copyText(toTsv(rows),`${rows.length}개 행을 복사했습니다.`):showToast("복사할 일정이 없습니다.");
   }
   if(t.id==='clearPastButton'){
-    const rows=state.slots.filter(s=>s.date<TODAY);
-    if(!rows.length){showToast("지난 일정이 없습니다.");return}
-    if(confirm(`지난 날짜의 계정 ${rows.length}개를 모두 삭제합니다.\n되돌릴 수 없습니다.`)){
-      state.slots=state.slots.filter(s=>s.date>=TODAY);persist();showToast(`지난 일정 ${rows.length}개를 삭제했습니다.`);
-    }
+    const ids=state.slots.filter(s=>s.date&&s.date<TODAY).map(s=>s.id);
+    if(!ids.length){showToast("지난 일정이 없습니다.");return}
+    if(confirm(`지난 날짜의 행 ${ids.length}개를 삭제합니다.`))deleteRows(ids,`지난 일정 ${ids.length}개를 삭제했습니다.`);
   }
-
   if(t.id==='pasteButton'){
     const form=document.querySelector('#pasteForm');form.reset();
     document.querySelector('#pasteResult').className='import-result';
@@ -416,7 +478,6 @@ document.addEventListener('click',e=>{
     setTimeout(()=>document.querySelector('#pasteInput').focus(),50);
   }
   if(t.hasAttribute('data-close-paste'))document.querySelector('#pasteDialog').close();
-
   if(t.id==='menuButton')document.querySelector('.sidebar').classList.toggle('open');
   if(t.id==='refreshButton')loadRemote();
   if(t.id==='saveSettings'){
@@ -431,40 +492,27 @@ document.addEventListener('click',e=>{
   }
 });
 
-document.querySelector('#editorForm').addEventListener('submit',e=>{e.preventDefault();if(saveEditor(e.currentTarget))document.querySelector('#editorDialog').close()});
-
 document.querySelector('#pasteForm').addEventListener('submit',e=>{
   e.preventDefault();
   const slots=previewPaste();
   if(!slots||!slots.length)return;
-  const mode=document.querySelector('#pasteMode').value;
-  if(mode==='replace'){
+  if(document.querySelector('#pasteMode').value==='replace'){
     const dates=new Set(slots.map(s=>s.date));
     state.slots=state.slots.filter(s=>!dates.has(s.date));
   }
   state.slots.push(...slots);
-  selected.clear();persist();
+  selected.clear();commit();
   document.querySelector('#pasteDialog').close();
   showToast(`계정 ${slots.length}개를 등록했습니다.`);
 });
 document.querySelector('#pasteInput').addEventListener('input',previewPaste);
 document.querySelector('#pasteDate').addEventListener('change',previewPaste);
 
-document.querySelector('#rosterSearch').addEventListener('input',renderRoster);
-document.querySelector('#showPast').addEventListener('change',()=>{selected.clear();renderRoster()});
-document.querySelector('#dateList').addEventListener('change',e=>{
-  const row=e.target.closest('input[data-slot]');
-  if(row){row.checked?selected.add(row.dataset.slot):selected.delete(row.dataset.slot);syncSelectionUi();return}
-  const head=e.target.closest('input[data-check-date]');
-  if(head){
-    const card=head.closest('.date-card');
-    card.querySelectorAll('input[data-slot]').forEach(box=>{
-      box.checked=head.checked;
-      head.checked?selected.add(box.dataset.slot):selected.delete(box.dataset.slot);
-    });
-    syncSelectionUi();
-  }
-});
+document.querySelector('#rosterSearch').addEventListener('input',renderSheet);
+document.querySelector('#showPast').addEventListener('change',()=>{selected.clear();renderSheet()});
+
+// 편집 중에 창을 닫아도 마지막 내용이 시트에 남도록 한다.
+window.addEventListener('beforeunload',()=>{if(saveTimer){clearTimeout(saveTimer);saveLocal()}});
 
 document.querySelector('#todayLabel').textContent=new Intl.DateTimeFormat('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'long'}).format(today);
 if(apiUrl())setSync('connected','Google Sheets 연결됨');

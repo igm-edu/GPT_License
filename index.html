@@ -18,7 +18,7 @@
         <span><b>GPT Business</b><small>계정 일정</small></span>
       </a>
       <nav class="nav" aria-label="주요 메뉴">
-        <button class="nav-item active" data-view="roster"><span>▤</span> 계정 일정</button>
+        <button class="nav-item active" data-view="roster"><span>▦</span> 계정 일정</button>
         <button class="nav-item" data-view="settings"><span>⚙</span> 연결 설정</button>
       </nav>
       <div class="sidebar-foot">
@@ -41,30 +41,34 @@
       </header>
 
       <section class="view active" id="rosterView">
-        <div class="hero">
-          <div>
-            <span class="pill">ACCOUNT SCHEDULE</span>
-            <h2>날짜별로 쓸 계정을<br>그대로 적어 두세요.</h2>
-            <p>엑셀에서 복사해 붙여넣으면 날짜별로 나눠서 정리합니다. 지난 날짜는 자동으로 접힙니다.</p>
-            <p class="hero-note" id="heroNote"></p>
-          </div>
-          <div class="hero-stat">
-            <span>다가오는 일정</span>
-            <strong id="heroDays">0</strong>
-            <small>days</small>
-          </div>
-        </div>
-
-        <div class="metrics" id="metrics"></div>
+        <div class="stat-strip" id="statStrip"></div>
 
         <div class="section-tools">
-          <div class="search"><span>⌕</span><input id="rosterSearch" placeholder="과정명, 이름, 계정 검색"></div>
+          <div class="search"><span>⌕</span><input id="rosterSearch" placeholder="날짜, 과정명, 이름, 계정 검색"></div>
           <label class="check-inline"><input type="checkbox" id="showPast"> <span id="showPastLabel">지난 날짜 보기</span></label>
           <button class="button ghost danger-text" id="deleteSelected" hidden>선택 삭제</button>
-          <button class="button ghost" id="addSlotButton">+ 계정 추가</button>
+          <button class="button ghost" id="copyAllButton">복사</button>
+          <button class="button ghost" id="addRowButton">+ 행 추가</button>
         </div>
 
-        <div id="dateList" class="date-list"></div>
+        <article class="card sheet-card">
+          <div class="sheet-wrap">
+            <table class="sheet">
+              <thead><tr>
+                <th class="check-col"><input type="checkbox" id="selectAll" aria-label="전체 선택"></th>
+                <th class="no-col">No</th>
+                <th class="date-col">날짜</th>
+                <th>과정명</th>
+                <th>이름</th>
+                <th class="account-col">계정</th>
+                <th>메모</th>
+                <th class="end-col"></th>
+              </tr></thead>
+              <tbody id="sheetBody"></tbody>
+            </table>
+          </div>
+          <p class="sheet-hint">칸을 눌러 바로 고칠 수 있습니다. <b>Enter</b>·<b>↑↓</b>로 위아래 이동, <b>Tab</b>으로 옆 칸 이동, 칸에서 <b>Ctrl+V</b>로 엑셀 표를 통째로 붙여넣을 수 있습니다. 맨 아래 빈 줄에 입력하면 행이 새로 생깁니다.</p>
+        </article>
       </section>
 
       <section class="view" id="settingsView">
@@ -80,39 +84,22 @@
             <p class="hint" id="connectionHint"></p>
           </article>
           <article class="card settings-card">
-            <p class="eyebrow">DATA</p><h3>데이터 내보내기</h3>
-            <p>화면에 보이는 일정을 엑셀에 붙여넣을 수 있는 형태로 복사합니다. 지난 날짜를 함께 보려면 목록 위의 <b>지난 날짜 보기</b>를 켜세요.</p>
+            <p class="eyebrow">DATA</p><h3>정리</h3>
+            <p>지난 날짜는 목록에서 자동으로 빠집니다. 더 이상 필요 없으면 여기서 한 번에 지울 수 있습니다.</p>
             <div class="button-row">
-              <button class="button ghost" id="copyAllButton">전체 복사</button>
               <button class="button ghost danger-text" id="clearPastButton">지난 날짜 모두 삭제</button>
             </div>
-            <p class="hint">복사하면 <code>날짜 · 과정명 · 이름 · 계정 · 메모</code> 순서의 탭 구분 표로 만들어집니다.</p>
-          </article>
-          <article class="card settings-card span-2">
-            <p class="eyebrow">SHEET</p><h3>시트 구성</h3>
-            <p>계정 일정은 <code>slots</code> 시트에 저장됩니다. 기존의 <code>roots</code>, <code>children</code>, <code>guests</code>, <code>courses</code> 시트는 건드리지 않고 그대로 보존합니다.</p>
+            <p class="hint">계정 일정은 <code>slots</code> 시트에 저장됩니다. 기존 <code>roots</code>, <code>children</code>, <code>guests</code>, <code>courses</code> 시트는 건드리지 않고 그대로 보존합니다.</p>
           </article>
         </div>
       </section>
     </main>
   </div>
 
-  <dialog id="editorDialog">
-    <form method="dialog" id="editorForm">
-      <div class="dialog-head"><div><p class="eyebrow" id="dialogEyebrow">NEW RECORD</p><h2 id="dialogTitle">계정 추가</h2></div><button type="button" class="icon-button" data-close-editor aria-label="닫기">×</button></div>
-      <div id="formFields" class="form-grid"></div>
-      <div class="dialog-actions">
-        <button type="button" class="button ghost danger-text" id="deleteRecord" hidden>삭제</button>
-        <button type="button" class="button ghost" data-close-editor>취소</button>
-        <button type="submit" class="button primary">저장</button>
-      </div>
-    </form>
-  </dialog>
-
   <dialog id="pasteDialog">
     <form id="pasteForm">
       <div class="dialog-head"><div><p class="eyebrow">EXCEL PASTE</p><h2>엑셀에서 붙여넣기</h2></div><button type="button" class="icon-button" data-close-paste aria-label="닫기">×</button></div>
-      <p class="card-note">엑셀에서 표를 그대로 복사해 아래 칸에 붙여넣으세요. <b>머리글에 날짜가 있으면</b> 날짜별로 알아서 나눕니다. 날짜 머리글이 없으면 아래에서 날짜를 골라 주세요.</p>
+      <p class="card-note">날짜가 <b>여러 열로 나뉜 표</b>를 통째로 넣을 때 씁니다. 한 날짜짜리 단순한 표라면 그냥 시트의 칸에서 <b>Ctrl+V</b> 하셔도 됩니다.</p>
       <div class="form-grid">
         <label>날짜 머리글이 없을 때 쓸 날짜<input type="date" id="pasteDate"></label>
         <label>처리 방식<select id="pasteMode">
@@ -131,7 +118,7 @@
     </form>
   </dialog>
 
-  <div class="toast" id="toast" role="status"></div>
+  <div class="toast" id="toast" role="status"><span id="toastText"></span><button id="toastAction" hidden>되돌리기</button></div>
   <script src="config.js"></script>
   <script src="app.js"></script>
 </body>
