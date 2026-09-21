@@ -2,9 +2,7 @@ const SHEETS = {
   roots: ["id","name","email","billingDay","expiry","capacity","status","memo"],
   children: ["id","rootId","name","email","status","memo"],
   guests: ["id","name","email","organization","rootId","courseId","start","end","removedAt","memo"],
-  courses: ["id","title","start","end","required","assigned","memberMode","rootId","manager","status","memo"],
-  // 날짜별 계정 일정. 지금 화면이 실제로 쓰는 시트다.
-  slots: ["id","date","course","name","account","memo"]
+  courses: ["id","title","start","end","required","assigned","memberMode","rootId","manager","status","memo"]
 };
 
 // These values represent the date and time entered by an operator, not an
@@ -12,8 +10,7 @@ const SHEETS = {
 const TEXT_DATE_COLUMNS = {
   roots: ["expiry"],
   guests: ["start", "end", "removedAt"],
-  courses: ["start", "end"],
-  slots: ["date"]
+  courses: ["start", "end"]
 };
 
 function doGet(e) {
@@ -92,11 +89,6 @@ function readSettings_() {
 
 function validate_(data) {
   ["roots","children","guests","courses"].forEach(k => { if (!Array.isArray(data[k])) throw new Error(`${k} must be an array`); });
-  if (data.slots && !Array.isArray(data.slots)) throw new Error("slots must be an array");
-  (data.slots || []).forEach(s => {
-    if (!s.date || !/^\d{4}-\d{2}-\d{2}$/.test(String(s.date))) throw new Error(`Invalid slot date: ${s.date}`);
-    if (!s.account) throw new Error(`Slot without account on ${s.date}`);
-  });
   const ids = data.roots.map(r => r.id);
   if (new Set(ids).size !== ids.length) throw new Error("Duplicate root id");
   data.guests.forEach(g => { if (g.end < g.start) throw new Error("Guest end date is invalid"); });
